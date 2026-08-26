@@ -2,6 +2,7 @@
 #include "net/network/rawsocket.hpp"
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <string_view>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -25,4 +26,6 @@ class EndpointManager {
 public:
   static int Bind(const Socket &socket, const Endpoint &endpoint);
   static int Connect(const Socket &socket, const Endpoint &endpoint);
+  static Endpoint Construct(int ip_version, std::string_view host, short port);
+  static int FamilyToVersion(int family);
 };

@@ -9,8 +9,11 @@ enum class TCPListenerError {
   AcceptError,
 };
 
+using UDPListenerError = TCPListenerError;
+
 class TCPListener {
   Socket socket_;
+  Endpoint endpoint_;
 
 public:
   TCPListener(Socket &&sock);
@@ -19,4 +22,19 @@ public:
   bind(const Endpoint &endpoint);
 
   std::expected<TCPConnection, TCPListenerError> accept();
+
+  const Socket &socket() const;
+};
+
+class UDPListener {
+  Socket socket_;
+  Endpoint endpoint_;
+
+public:
+  UDPListener(Socket &&socket);
+
+  static std::expected<UDPListener, UDPListenerError>
+  bind(const Endpoint &endpoint);
+
+  const Socket &socket() const;
 };

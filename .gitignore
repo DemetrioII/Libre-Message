@@ -1,0 +1,7 @@
+bazel-*
+.bazeliskrc
+compile_commands.json
+generate_compile_commands.sh
+generate_json.py
+net/network/main.cpp
+net/network/listening.cpp
