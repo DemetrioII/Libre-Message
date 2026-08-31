@@ -21,6 +21,14 @@ class TCPPeer {
 
   std::jthread event_loop_jthread_;
 
+  void on_read(int fd);
+
+  void on_write(int fd);
+
+  void make_tcp_connection(TCPConnection &&connection);
+
+  void on_disconnect(int fd);
+
 public:
   TCPPeer(std::string_view host, short port, int ip_version);
 

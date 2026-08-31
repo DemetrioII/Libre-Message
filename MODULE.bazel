@@ -1,0 +1,11 @@
+module(
+	name = "libremessage",
+	version = "0.2.0",
+)
+
+bazel_dep(name = "rules_cc", version="0.2.22")
+
+bazel_dep(
+    name = "spdlog",
+    version = "1.17.0",
+)

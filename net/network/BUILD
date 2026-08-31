@@ -10,6 +10,7 @@ cc_library(
 	deps = [
 		"//net/event_loop:event_loop",
 		"//net/transport:transport",
+		"@spdlog//:spdlog",
 	],
 	linkopts = [
 		"-pthread",

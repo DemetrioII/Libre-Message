@@ -5,6 +5,11 @@
 #include <memory>
 #include <mutex>
 
+using ModifyEventsHandler = std::function<void(int, uint32_t)>;
+using ReadHandler = std::function<void(int)>;
+using WriteHandler = std::function<void(int)>;
+using DisconnectHandler = std::function<void(int)>;
+
 class TCPListenerEventHandler : public EventHandler {
   std::weak_ptr<TCPListener> listener_;
 
@@ -26,21 +31,19 @@ class TCPConnectionEventHandler : public EventHandler {
 
   void handle_disconnect();
 
-  std::function<void(int fd)> on_readable_;
+  ReadHandler on_readable_;
 
-  std::function<void(int fd)> on_writable_;
+  WriteHandler on_writable_;
 
-  std::function<void(int fd)> on_disconnected_;
+  DisconnectHandler on_disconnected_;
 
-  std::function<void(int fd, uint32_t)> enable_writing_;
+  ModifyEventsHandler modify_events_;
 
 public:
   TCPConnectionEventHandler(int, std::shared_ptr<TCPListener>,
                             std::shared_ptr<TCPConnection> connection,
-                            const std::function<void(int, uint32_t)> &,
-                            const std::function<void(int)> &,
-                            const std::function<void(int)> &,
-                            const std::function<void(int)> &);
+                            const ModifyEventsHandler &, const ReadHandler &,
+                            const WriteHandler &, const DisconnectHandler &);
 
   void handle(const Event &event) override;
   ~TCPConnectionEventHandler() override;

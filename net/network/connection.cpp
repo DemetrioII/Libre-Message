@@ -1,6 +1,7 @@
 #include "net/network/connection.hpp"
 #include <errno.h>
 #include <iostream>
+#include <spdlog/spdlog.h>
 
 template <class... Ts> struct overloaded : Ts... {
   using Ts::operator()...;
@@ -14,8 +15,9 @@ TCPConnection::TCPConnection(Socket &&socket, const Endpoint &endpoint)
 std::expected<TCPConnection, TCPConnectionError>
 TCPConnection::connect(Socket &&socket, const Endpoint &endpoint) {
   auto res = EndpointManager::Connect(socket, endpoint);
-  if (res == -1)
+  if (res == -1) {
     return std::unexpected(TCPConnectionError::WrongProtocol);
+  }
   fcntl(socket.get_fd(), F_SETFL,
         fcntl(socket.get_fd(), F_GETFL, 0) | O_NONBLOCK);
   return TCPConnection{std::move(socket), endpoint};
@@ -24,8 +26,9 @@ TCPConnection::connect(Socket &&socket, const Endpoint &endpoint) {
 std::expected<std::size_t, TCPConnectionError>
 TCPConnection::send(std::span<const std::byte> data) {
   const auto res = send_buffer_.send(socket_.get_fd(), data);
-  if (res)
-    has_to_write_ = true;
+  spdlog::debug("sending {} bytes to buffer on connection {}", data.size(),
+                (void *)this);
+  has_to_write_ = true;
   return res;
 }
 
@@ -61,7 +64,8 @@ TCPConnection::recv(std::span<std::byte> data) {
       continue;
     }
 
-    std::cerr << errno << std::endl;
+    spdlog::error("error during receiving on TCP connection {}, error: {}",
+                  (void *)this, strerror(errno));
 
     return std::unexpected(TCPConnectionError::ReceiveError);
   }
@@ -69,7 +73,8 @@ TCPConnection::recv(std::span<std::byte> data) {
 }
 
 TCPConnection::~TCPConnection() {
-  std::cout << "CONNECTION CLOSED!" << std::endl;
+  spdlog::info("connection {} with fd={} closed", (void *)this,
+               socket_.get_fd());
 }
 
 const Endpoint &TCPConnection::endpoint() const { return endpoint_; }

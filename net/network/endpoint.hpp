@@ -26,6 +26,7 @@ class EndpointManager {
 public:
   static int Bind(const Socket &socket, const Endpoint &endpoint);
   static int Connect(const Socket &socket, const Endpoint &endpoint);
-  static Endpoint Construct(int ip_version, std::string_view host, short port);
+  static Endpoint Construct(int ip_version, std::string_view host,
+                            uint16_t port);
   static int FamilyToVersion(int family);
 };

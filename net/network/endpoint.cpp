@@ -1,5 +1,6 @@
 #include "net/network/endpoint.hpp"
 #include <arpa/inet.h>
+#include <spdlog/spdlog.h>
 
 int EndpointManager::Bind(const Socket &socket, const Endpoint &endpoint) {
   int res = std::visit(
@@ -8,22 +9,30 @@ int EndpointManager::Bind(const Socket &socket, const Endpoint &endpoint) {
                       sizeof(endpoint.address));
       },
       endpoint);
-  res = ::listen(socket.get_fd(), 10);
+  if (res != 0) {
+    spdlog::error("error binding socket {} to endpoint {}", (void *)&socket,
+                  (void *)&endpoint);
+  }
   return res;
 }
 
 int EndpointManager::Connect(const Socket &socket, const Endpoint &endpoint) {
-  return std::visit(
+  int res = std::visit(
       [&socket](const auto &endpoint) {
         return ::connect(socket.get_fd(),
                          (struct sockaddr *)(&endpoint.address),
                          sizeof(endpoint.address));
       },
       endpoint);
+  if (res != 0) {
+    spdlog::error("error connecting from socket {} to endpoint {}",
+                  (void *)&socket, (void *)&endpoint);
+  }
+  return res;
 }
 
 Endpoint EndpointManager::Construct(int ip_version, std::string_view host,
-                                    short port) {
+                                    uint16_t port) {
   switch (ip_version) {
   case 4: {
     sockaddr_in addr{};
@@ -31,6 +40,10 @@ Endpoint EndpointManager::Construct(int ip_version, std::string_view host,
     addr.sin_port = htons(port);
     inet_pton(AF_INET, host.data(), &addr.sin_addr);
     IPv4Endpoint endpoint{.address = addr};
+    spdlog::info("created new endpoint {} IPv4:\n"
+                 "address:	{}\n"
+                 "port:		{}\n",
+                 (void *)&endpoint, host, port);
     return endpoint;
   }
   case 6: {
@@ -39,6 +52,10 @@ Endpoint EndpointManager::Construct(int ip_version, std::string_view host,
     addr.sin6_port = htons(port);
     inet_pton(AF_INET6, host.data(), &addr.sin6_addr);
     IPv6Endpoint endpoint{.address = addr};
+    spdlog::info("created new endpoint {} IPv6:\n"
+                 "address:	{}\n"
+                 "port:		{}\n",
+                 (void *)&endpoint, host, port);
     return endpoint;
   }
   default: {

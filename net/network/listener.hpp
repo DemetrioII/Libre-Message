@@ -7,6 +7,7 @@ enum class TCPListenerError {
   WrongProtocol,
   BindError,
   AcceptError,
+  ListenError,
 };
 
 using UDPListenerError = TCPListenerError;

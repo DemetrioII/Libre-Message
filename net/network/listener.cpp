@@ -1,5 +1,6 @@
 #include "net/network/listener.hpp"
 #include <iostream>
+#include <spdlog/spdlog.h>
 #include <stdexcept>
 
 template <class... Ts> struct overloaded : Ts... {
@@ -8,7 +9,10 @@ template <class... Ts> struct overloaded : Ts... {
 
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
-TCPListener::TCPListener(Socket &&socket) : socket_(std::move(socket)) {}
+TCPListener::TCPListener(Socket &&socket) : socket_(std::move(socket)) {
+  spdlog::debug("creating tcp listener from socket with fd={}",
+                socket_.get_fd());
+}
 
 std::expected<TCPListener, TCPListenerError>
 TCPListener::bind(const Endpoint &endpoint) {
@@ -32,10 +36,19 @@ TCPListener::bind(const Endpoint &endpoint) {
       endpoint);
   fcntl(listener->socket_.get_fd(), F_SETFL,
         fcntl(listener->socket_.get_fd(), F_GETFL, 0) | O_NONBLOCK);
-  if (!listener.has_value())
+  if (!listener.has_value()) {
+    spdlog::error("wrong protocol: endpoint of {} doesn't match to TCP",
+                  typeid(endpoint).name());
     return listener;
+  }
   if (EndpointManager::Bind(listener->socket_, endpoint) == -1)
     return std::unexpected(TCPListenerError::BindError);
+  if (::listen(listener->socket_.get_fd(), 10) != 0) {
+    spdlog::error("error listening on listener {} (fd={}), errno: {}",
+                  (void *)&listener, listener->socket_.get_fd(),
+                  strerror(errno));
+    return std::unexpected(TCPListenerError::ListenError);
+  }
   listener->endpoint_ = endpoint;
   return listener;
 }
@@ -45,8 +58,11 @@ std::expected<TCPConnection, TCPListenerError> TCPListener::accept() {
   socklen_t addr_len = sizeof(addr_storage);
   int fd = ::accept(socket_.get_fd(),
                     reinterpret_cast<sockaddr *>(&addr_storage), &addr_len);
-  if (fd == -1)
+  if (fd == -1) {
+    spdlog::error("accept on listener was failed with error: {}",
+                  strerror(errno));
     return std::unexpected(TCPListenerError::AcceptError);
+  }
 
   std::string host;
   uint16_t port = 0;
