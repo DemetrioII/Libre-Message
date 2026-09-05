@@ -15,12 +15,13 @@ using UDPListenerError = TCPListenerError;
 class TCPListener {
   Socket socket_;
   Endpoint endpoint_;
+  bool use_tls_;
 
 public:
-  TCPListener(Socket &&sock);
+  TCPListener(Socket &&sock, bool use_tls);
 
   static std::expected<TCPListener, TCPListenerError>
-  bind(const Endpoint &endpoint);
+  bind(const Endpoint &endpoint, bool use_tls);
 
   std::expected<TCPConnection, TCPListenerError> accept();
 

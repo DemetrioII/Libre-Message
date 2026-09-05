@@ -6,3 +6,5 @@ generate_json.py
 net/network/main.cpp
 net/network/listening.cpp
 *.kdev4
+*.crt
+*.key

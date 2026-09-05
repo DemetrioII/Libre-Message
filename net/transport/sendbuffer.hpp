@@ -1,4 +1,5 @@
 #pragma once
+#include "net/transport/transport.hpp"
 #include <array>
 #include <expected>
 #include <span>
@@ -17,10 +18,10 @@ enum class SendError {
 template <std::size_t N = 1024> class SendBuffer {
   std::array<std::byte, N> small_;
 
-  std::unordered_map<int, std::vector<std::byte>> large_;
+  std::vector<std::byte> large_;
 
 public:
-  std::size_t send(int fd, std::span<const std::byte> data);
+  void send(std::span<const std::byte> data);
 
-  std::expected<std::size_t, SendError> flush(int fd);
+  FlushResult flush(TCPTransport &transport);
 };

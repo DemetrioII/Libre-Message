@@ -9,27 +9,28 @@ template <class... Ts> struct overloaded : Ts... {
 
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
-TCPListener::TCPListener(Socket &&socket) : socket_(std::move(socket)) {
+TCPListener::TCPListener(Socket &&socket, bool use_tls)
+    : socket_(std::move(socket)), use_tls_(use_tls) {
   spdlog::debug("creating tcp listener from socket with fd={}",
                 socket_.get_fd());
 }
 
 std::expected<TCPListener, TCPListenerError>
-TCPListener::bind(const Endpoint &endpoint) {
+TCPListener::bind(const Endpoint &endpoint, bool use_tls) {
   auto listener = std::visit(
-      overloaded{[](const IPv4Endpoint &endpoint)
+      overloaded{[use_tls](const IPv4Endpoint &endpoint)
                      -> std::expected<TCPListener, TCPListenerError> {
                    auto socket = Socket(AF_INET, SOCK_STREAM, 0);
-                   TCPListener listener{std::move(socket)};
+                   TCPListener listener{std::move(socket), use_tls};
                    return listener;
                  },
-                 [](const IPv6Endpoint &endpoint)
+                 [use_tls](const IPv6Endpoint &endpoint)
                      -> std::expected<TCPListener, TCPListenerError> {
                    auto socket = Socket(AF_INET6, SOCK_STREAM, 0);
-                   TCPListener listener{std::move(socket)};
+                   TCPListener listener{std::move(socket), use_tls};
                    return listener;
                  },
-                 [](const auto &enpoint)
+                 [use_tls](const auto &enpoint)
                      -> std::expected<TCPListener, TCPListenerError> {
                    return std::unexpected(TCPListenerError::WrongProtocol);
                  }},
@@ -84,9 +85,10 @@ std::expected<TCPConnection, TCPListenerError> TCPListener::accept() {
   fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
 
   return TCPConnection{
-      Socket{fd}, EndpointManager::Construct(
-                      EndpointManager::FamilyToVersion(addr_storage.ss_family),
-                      host, port)};
+      Socket{fd},
+      EndpointManager::Construct(
+          EndpointManager::FamilyToVersion(addr_storage.ss_family), host, port),
+      use_tls_};
 }
 
 const Socket &TCPListener::socket() const { return socket_; }

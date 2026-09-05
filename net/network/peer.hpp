@@ -8,7 +8,7 @@
 #include <utility>
 
 class TCPPeer {
-
+  bool use_tls_{false};
   std::mutex connection_map_mutex_;
   std::unordered_map<int, std::shared_ptr<TCPConnection>> connections_;
   std::unordered_map<int, std::shared_ptr<TCPConnectionEventHandler>>
@@ -30,15 +30,15 @@ class TCPPeer {
   void on_disconnect(int fd);
 
 public:
-  TCPPeer(std::string_view host, short port, int ip_version);
+  TCPPeer(std::string_view host, short port, int ip_version, bool use_tls);
 
-  void connect(std::string_view host, short port, int ip_version);
+  int connect(std::string_view host, short port, int ip_version);
 
   void disconnect(std::string_view host, short port);
 
   void run_event_loop();
 
-  std::size_t send_data(int fd, std::span<std::byte> data);
+  void send_data(int fd, std::span<std::byte> data);
 
   void broadcast(std::span<std::byte> data);
 };

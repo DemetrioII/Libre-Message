@@ -1,41 +1,25 @@
 #include "net/transport/sendbuffer.hpp"
 #include <errno.h>
+#include <spdlog/spdlog.h>
 
-template <>
-std::size_t SendBuffer<>::send(int fd, std::span<const std::byte> data) {
-  if (large_.find(fd) != large_.end()) {
-    large_[fd].insert(large_[fd].end(), data.begin(), data.end());
-  } else {
-    large_[fd] = std::vector<std::byte>{data.begin(), data.end()};
-  }
-
-  return data.size();
+template <> void SendBuffer<>::send(std::span<const std::byte> data) {
+  large_.insert(large_.end(), data.begin(), data.end());
 }
 
-template <> std::expected<std::size_t, SendError> SendBuffer<>::flush(int fd) {
-  std::size_t total = 0;
-  const auto &data = large_[fd];
-  while (total < data.size()) {
-    const auto n = ::send(fd, data.data() + total, data.size() - total, 0);
+template <> FlushResult SendBuffer<>::flush(TCPTransport &transport) {
+  const auto res = std::visit(
+      [this](auto &transport) {
+        const auto res =
+            transport.write(std::span(large_.begin(), large_.end()));
+        return res;
+      },
+      transport);
 
-    if (n > 0) {
-      total += static_cast<std::size_t>(n);
-      continue;
-    }
-    if (n == 0) {
-      return std::unexpected(SendError::UnknownError);
-    }
-
-    if (errno == EINTR) {
-      continue;
-    }
-
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      return std::unexpected(SendError::WouldBlock);
-    }
-
-    return 0;
+  if (res.status != IOStatus::Error) {
+    large_.erase(large_.begin(), large_.begin() + res.bytes_sent);
+  } else {
+    spdlog::error("error sending using transport {}", (void *)&transport);
   }
-  large_[fd].erase(large_[fd].begin(), large_[fd].begin() + total);
-  return total;
+
+  return res;
 }

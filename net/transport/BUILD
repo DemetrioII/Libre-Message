@@ -12,5 +12,10 @@ cc_library(
 	],
 	linkopts = [
 		"-pthread",
+		"-lssl",
+		"-lcrypto",
+	],
+	deps = [
+		"@spdlog//:spdlog",
 	],
 )

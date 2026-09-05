@@ -20,30 +20,35 @@ class TCPConnection {
 
   SendBuffer<> send_buffer_;
 
+  TCPTransport transport_;
+
   bool has_to_write_{false};
 
 public:
-  TCPConnection() : socket_(-1) {}
-  TCPConnection(Socket &&socket, const Endpoint &endpoint);
+  TCPConnection() : socket_(-1), transport_(PlainTCPTransport(-1)) {}
+  TCPConnection(Socket &&socket, const Endpoint &endpoint, bool use_tls);
 
   TCPConnection(TCPConnection &&) = default;
 
   TCPConnection &operator=(TCPConnection &&) = default;
 
   static std::expected<TCPConnection, TCPConnectionError>
-  connect(Socket &&socket, const Endpoint &endpoint);
+  connect(Socket &&socket, const Endpoint &endpoint, bool use_tls);
 
-  std::expected<std::size_t, TCPConnectionError>
-  send(std::span<const std::byte> data);
+  void send(std::span<const std::byte> data);
 
   std::expected<std::size_t, TCPConnectionError>
   recv(std::span<std::byte> data);
 
   bool has_to_write() const;
 
-  std::expected<void, TCPConnectionError> flush();
+  FlushResult flush();
 
   const Socket &socket() const;
+
+  void set_tls_connection();
+
+  void set_tls_acception();
 
   const Endpoint &endpoint() const;
 

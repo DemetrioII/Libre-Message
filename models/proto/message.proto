@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package libre_message;
+
+message Envelope {
+  Message message = 1;
+}
+
+message Message {
+  bytes id = 1;
+
+  bytes sender_id = 2;
+
+  bytes recipient_id = 3;
+
+  uint64 timestamp = 4;
+
+  oneof content {
+    TextMessage text = 5;
+  }
+}
+
+message TextMessage {
+  string text = 1;
+}
