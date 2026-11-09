@@ -14,7 +14,13 @@ void TCPListenerEventHandler::handle(const Event &events) {
   if (!(events.events & EPOLLIN))
     return;
 
-  auto connection = listener_.lock()->accept();
+  auto listener = listener_.lock();
+  if (!listener) {
+    spdlog::error("listener was destroyed");
+    return;
+  }
+
+  auto connection = listener->accept();
 
   if (!connection) {
     spdlog::error("accept on listener was failed with connection");
@@ -37,8 +43,14 @@ TCPConnectionEventHandler::TCPConnectionEventHandler(
       on_disconnected_(on_disconnected), modify_events_(enable_writing) {}
 
 void TCPConnectionEventHandler::handle_disconnect() {
+  auto connection = connection_.lock();
+  if (!connection) {
+    spdlog::warn("connection handler fired for destroyed connection");
+    return;
+  }
+
   spdlog::info("peer with fd {} was disconnected",
-               connection_.lock()->socket().get_fd());
+               connection->socket().get_fd());
 }
 
 void TCPConnectionEventHandler::handle(const Event &events) {

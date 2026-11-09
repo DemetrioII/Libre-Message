@@ -14,10 +14,15 @@ cc_library(
 	],
 	srcs = [
 		"manager.cpp",
+		"session.cpp",
+		"connection_manager.cpp",
 	],
 	deps = [
 		"//models/proto:message_cc_proto",
 		"//models:models",
 		"//net/network:network",
+	],
+	visibility = [
+		"//visibility:public"
 	],
 )

@@ -10,6 +10,7 @@
 class EventLoop {
   int epollfd{-1};
   int wakeupfd{-1};
+  std::mutex map_mutex_;
   std::unordered_map<int, std::weak_ptr<EventHandler>> fd_to_handler_;
 
 public:

@@ -1,6 +1,7 @@
 #include "net/network/endpoint.hpp"
 #include <arpa/inet.h>
 #include <spdlog/spdlog.h>
+#include <stdexcept>
 
 int EndpointManager::Bind(const Socket &socket, const Endpoint &endpoint) {
   int res = std::visit(
@@ -58,10 +59,9 @@ Endpoint EndpointManager::Construct(int ip_version, std::string_view host,
                  (void *)&endpoint, host, port);
     return endpoint;
   }
-  default: {
-    sockaddr_un addr{};
-    // ?
-  }
+  default:
+    throw std::runtime_error("unsupported IP version " +
+                             std::to_string(ip_version));
   }
 }
 

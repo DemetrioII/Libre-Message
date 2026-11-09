@@ -1,31 +1,35 @@
 #include "models/framer.hpp"
-#include <cstdint>
+#include <arpa/inet.h>
+#include <cstring>
 
-std::vector<std::byte> Framer::frame(std::span<const std::byte> data) {
-  std::vector<std::byte> result(sizeof(std::uint32_t) + data.size());
-  const auto size = static_cast<std::uint32_t>(data.size());
+std::vector<std::byte> Framer::frame(std::span<const std::byte> payload) {
+  std::vector<std::byte> result(sizeof(std::uint32_t) + payload.size());
+  const auto length = htonl(static_cast<std::uint32_t>(payload.size()));
 
-  std::memcpy(result.data(), &size, sizeof(size));
-  std::memcpy(result.data() + sizeof(size), data.data(), data.size());
+  std::memcpy(result.data(), &length, sizeof(length));
+  std::memcpy(result.data() + sizeof(length), payload.data(), payload.size());
 
   return result;
 }
 
 std::expected<std::vector<std::byte>, FramerError>
-unframe(std::span<const std::byte> data) {
+Framer::unframe(std::span<const std::byte> data) {
   if (data.size() < sizeof(std::uint32_t))
     return std::unexpected(FramerError::ShortHeader);
 
-  std::uint32_t size;
+  std::uint32_t length;
+  std::memcpy(&length, data.data(), sizeof(length));
+  length = ntohl(length);
 
-  std::memcpy(&size, data.data(), sizeof(size));
+  if (length > kMaxFrameSize)
+    return std::unexpected(FramerError::FrameTooLarge);
 
-  if (data.size() < sizeof(size) + size)
+  if (data.size() < sizeof(length) + length)
     return std::unexpected(FramerError::ShortPayload);
 
-  std::vector<std::byte> payload(size);
+  std::vector<std::byte> payload(length);
 
-  std::memcpy(payload.data(), data.data() + sizeof(size), size);
+  std::memcpy(payload.data(), data.data() + sizeof(length), length);
 
   return payload;
 }

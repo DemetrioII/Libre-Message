@@ -1,4 +1,5 @@
 #pragma once
+#include "models/message.hpp"
 #include "net/event_loop/event_loop.hpp"
 #include "net/network/handlers.hpp"
 #include "net/network/listener.hpp"
@@ -21,6 +22,10 @@ class TCPPeer {
 
   std::jthread event_loop_jthread_;
 
+  std::string sender_id_;
+
+  std::function<void(int, MessageModel)> on_message_;
+
   void on_read(int fd);
 
   void on_write(int fd);
@@ -28,6 +33,8 @@ class TCPPeer {
   void make_tcp_connection(TCPConnection &&connection);
 
   void on_disconnect(int fd);
+
+  std::vector<std::byte> make_handshake_message() const;
 
 public:
   TCPPeer(std::string_view host, short port, int ip_version, bool use_tls);
@@ -41,4 +48,8 @@ public:
   void send_data(int fd, std::span<std::byte> data);
 
   void broadcast(std::span<std::byte> data);
+
+  void set_sender_id(std::string id);
+
+  void set_message_handler(std::function<void(int, MessageModel)> handler);
 };

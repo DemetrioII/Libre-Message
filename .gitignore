@@ -8,3 +8,6 @@ net/network/listening.cpp
 *.kdev4
 *.crt
 *.key
+AGENTS.md
+PLAN.md
+user_id

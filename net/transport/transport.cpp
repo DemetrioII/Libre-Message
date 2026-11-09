@@ -1,9 +1,18 @@
 #include "net/transport/transport.hpp"
 #include <errno.h>
-#include <iostream>
 #include <openssl/err.h>
+#include <poll.h>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
+
+static bool wait_for_io(int fd, short events) {
+  pollfd pfd{fd, events, 0};
+  int rc;
+  do {
+    rc = ::poll(&pfd, 1, 5000);
+  } while (rc == -1 && errno == EINTR);
+  return rc > 0;
+}
 
 FlushResult PlainTCPTransport::write(std::span<const std::byte> data) {
   const auto n = ::send(fd_, data.data(), data.size(), MSG_NOSIGNAL);
@@ -61,8 +70,6 @@ TLSState TLSTransport::state() const noexcept { return state_; }
 FlushResult TLSTransport::connect() {
   const int ret = SSL_connect(ssl_);
 
-  std::cout << "LAST TLS STATUS: " << ret << std::endl;
-
   if (ret == 1) {
     state_ = TLSState::Established;
     return {0, IOStatus::Complete};
@@ -71,9 +78,17 @@ FlushResult TLSTransport::connect() {
   state_ = TLSState::Handshaking;
   switch (SSL_get_error(ssl_, ret)) {
   case SSL_ERROR_WANT_READ:
+    if (!wait_for_io(fd_, POLLIN)) {
+      state_ = TLSState::Error;
+      return {0, IOStatus::Error};
+    }
     return {0, IOStatus::WantRead};
 
   case SSL_ERROR_WANT_WRITE:
+    if (!wait_for_io(fd_, POLLOUT)) {
+      state_ = TLSState::Error;
+      return {0, IOStatus::Error};
+    }
     return {0, IOStatus::WantWrite};
 
   default:
@@ -100,9 +115,17 @@ FlushResult TLSTransport::accept() {
 
   switch (SSL_get_error(ssl_, ret)) {
   case SSL_ERROR_WANT_READ:
+    if (!wait_for_io(fd_, POLLIN)) {
+      state_ = TLSState::Error;
+      return {0, IOStatus::Error};
+    }
     return {0, IOStatus::WantRead};
 
   case SSL_ERROR_WANT_WRITE:
+    if (!wait_for_io(fd_, POLLOUT)) {
+      state_ = TLSState::Error;
+      return {0, IOStatus::Error};
+    }
     return {0, IOStatus::WantWrite};
 
   default:
@@ -112,12 +135,12 @@ FlushResult TLSTransport::accept() {
     char buffer[256];
     ERR_error_string_n(err, buffer, sizeof(buffer));
 
-    spdlog::error("SSL_connect failed: {}", buffer);
+    spdlog::error("SSL_accept failed: {}", buffer);
     return {0, IOStatus::Error};
   }
 }
 
-TLSTransport::TLSTransport(int fd) : fd_(fd) {}
+TLSTransport::TLSTransport(int fd) : fd_(fd), state_(TLSState::Handshaking) {}
 
 void TLSTransport::set_role(int is_client) {
   if (is_client) {
@@ -190,11 +213,13 @@ TLSTransport::~TLSTransport() {
 }
 
 TLSTransport::TLSTransport(TLSTransport &&other) noexcept
-    : fd_(other.fd_), ctx_(other.ctx_), ssl_(other.ssl_) {
+    : ssl_(other.ssl_), ctx_(other.ctx_), fd_(other.fd_),
+      state_(other.state_) {
 
   other.fd_ = -1;
   other.ctx_ = nullptr;
   other.ssl_ = nullptr;
+  other.state_ = TLSState::Handshaking;
 }
 
 TLSTransport &TLSTransport::operator=(TLSTransport &&other) noexcept {
@@ -228,17 +253,21 @@ FlushResult TLSTransport::write(std::span<const std::byte> data) {
     return {static_cast<std::size_t>(n), IOStatus::Complete};
   }
 
-  spdlog::error("error sending using transport {}, error: {}", (void *)this,
-                strerror(errno));
-  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+  switch (SSL_get_error(ssl_, n)) {
+  case SSL_ERROR_WANT_READ:
+  case SSL_ERROR_WANT_WRITE:
     return {0, IOStatus::WantWrite};
-
-  if (n < 0 && errno == EINTR)
-    return {0, IOStatus::WantWrite};
-
-  spdlog::error("{}", SSL_get_error(ssl_, n));
-
-  return {0, IOStatus::Error};
+  case SSL_ERROR_ZERO_RETURN:
+    return {0, IOStatus::Closed};
+  default: {
+    state_ = TLSState::Error;
+    unsigned long err = ERR_get_error();
+    char buffer[256];
+    ERR_error_string_n(err, buffer, sizeof(buffer));
+    spdlog::error("SSL_write failed: {}", buffer);
+    return {0, IOStatus::Error};
+  }
+  }
 }
 
 FlushResult TLSTransport::read(std::span<std::byte> data) {

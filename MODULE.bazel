@@ -9,3 +9,10 @@ bazel_dep(
     name = "spdlog",
     version = "1.17.0",
 )
+
+bazel_dep(name = "rules_proto", version="7.1.0")
+
+bazel_dep(name = "protobuf", version="36.1.bcr.1")
+
+bazel_dep(name = "googletest", version = "1.18.0")
+

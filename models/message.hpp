@@ -10,7 +10,11 @@ public:
 
   bool is_text() const;
 
+  bool is_handshake() const;
+
   std::string_view text() const;
+
+  std::string_view handshake_sender_id() const;
 
   bool is_for(const std::vector<std::byte> &user) const;
 

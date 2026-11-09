@@ -4,7 +4,8 @@
 #include <span>
 
 enum class DecodeError {
-
+  InvalidData,
+  MissingMessage,
 };
 
 class MessageCodec {

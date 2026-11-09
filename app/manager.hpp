@@ -6,22 +6,24 @@
 #include "net/network/peer.hpp"
 #include <expected>
 
-enum class ManagerError { SendError };
+enum class ManagerError { ConnectFailed };
 
 class Manager {
   SessionInfo session_info_;
   TCPPeer peer_net_;
-
-  std::unordered_map<std::string, int> connections_;
+  ConnectionManager connection_manager_;
+  std::string sender_id_;
 
 public:
   Manager(std::string_view host, uint16_t port, int version, bool use_tls);
-
-  std::expected<std::size_t, ManagerError> send(const libre_message::Message &);
 
   std::expected<void, ManagerError>
   connect(std::string_view host, uint16_t port,
           int version); // тут следует сделать конечно более абстракцию
 
   void send(const MessageModel &message);
+
+  void send(std::string_view, std::string &&msg_to_send);
+
+  void run_event_loop();
 };

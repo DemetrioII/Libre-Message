@@ -31,11 +31,13 @@ void EventLoop::add_fd(int fd_to_add, std::shared_ptr<EventHandler> handler,
 
   epoll_ctl(epollfd, EPOLL_CTL_ADD, fd_to_add, &ev);
 
+  std::lock_guard<std::mutex> lock(map_mutex_);
   fd_to_handler_[fd_to_add] = handler;
 }
 
 void EventLoop::remove_fd(int fd) {
   epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, nullptr);
+  std::lock_guard<std::mutex> lock(map_mutex_);
   fd_to_handler_.erase(fd);
 }
 
@@ -45,7 +47,7 @@ void EventLoop::run_once() {
   if (nfds == -1) {
     if (errno == EINTR)
       return;
-    throw std::runtime_error("Ошибка epoll_wait" +
+    throw std::runtime_error("epoll_wait failed: " +
                              std::string(strerror(errno)));
   }
 
@@ -59,9 +61,17 @@ void EventLoop::run_once() {
       continue;
     }
 
-    auto it = fd_to_handler_.find(tmp_fd);
-    if (it != fd_to_handler_.end() && it->second.lock()) {
-      it->second.lock()->handle({.fd = tmp_fd, .events = event_mask});
+    std::shared_ptr<EventHandler> handler;
+    {
+      std::lock_guard<std::mutex> lock(map_mutex_);
+      auto it = fd_to_handler_.find(tmp_fd);
+      if (it == fd_to_handler_.end())
+        continue;
+      handler = it->second.lock();
+    }
+
+    if (handler) {
+      handler->handle({.fd = tmp_fd, .events = event_mask});
     }
   }
 }

@@ -14,8 +14,8 @@ class TCPListenerEventHandler : public EventHandler {
   std::weak_ptr<TCPListener> listener_;
 
   std::function<void(TCPConnection &&)>
-      connection_callback_; // здесь предполагается добавление в мапу или что-то
-                            // похожее
+      connection_callback_; // here the accepted connection is added to the map
+                            // or something similar
 public:
   TCPListenerEventHandler(std::shared_ptr<TCPListener>,
                           const std::function<void(TCPConnection &&)>);

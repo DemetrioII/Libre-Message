@@ -24,4 +24,6 @@ public:
   void send(std::span<const std::byte> data);
 
   FlushResult flush(TCPTransport &transport);
+
+  bool empty() const noexcept { return large_.empty(); }
 };

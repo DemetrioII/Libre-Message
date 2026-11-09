@@ -17,9 +17,14 @@ message Message {
 
   oneof content {
     TextMessage text = 5;
+    Handshake handshake = 6;
   }
 }
 
 message TextMessage {
   string text = 1;
+}
+
+message Handshake {
+  bytes sender_id = 1;
 }

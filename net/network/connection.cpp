@@ -1,4 +1,5 @@
 #include "net/network/connection.hpp"
+#include "models/framer.hpp"
 #include <errno.h>
 #include <iostream>
 #include <spdlog/spdlog.h>
@@ -63,9 +64,10 @@ TCPConnection::connect(Socket &&socket, const Endpoint &endpoint,
 }
 
 void TCPConnection::send(std::span<const std::byte> data) {
-  spdlog::debug("sending {} bytes to buffer on connection {}", data.size(),
-                (void *)this);
-  send_buffer_.send(data);
+  auto framed = Framer::frame(data);
+  spdlog::debug("sending {} bytes ({} framed) to connection {}", data.size(),
+                framed.size(), (void *)this);
+  send_buffer_.send(framed);
   has_to_write_ = true;
 }
 
@@ -73,8 +75,7 @@ bool TCPConnection::has_to_write() const { return has_to_write_; }
 
 FlushResult TCPConnection::flush() {
   const auto res = send_buffer_.flush(transport_);
-  if (res.status == IOStatus::Complete)
-    has_to_write_ = false;
+  has_to_write_ = !send_buffer_.empty();
   return res;
 }
 
@@ -91,6 +92,12 @@ TCPConnection::recv(std::span<std::byte> data) {
   } else {
     return std::unexpected(TCPConnectionError::ReceiveError);
   }
+}
+
+IOStatus TCPConnection::receive() { return receive_buffer_.consume(transport_); }
+
+std::optional<std::vector<std::byte>> TCPConnection::next_message() {
+  return receive_buffer_.next_message();
 }
 
 TCPConnection::~TCPConnection() {

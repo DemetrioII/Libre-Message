@@ -35,13 +35,13 @@ TCPListener::bind(const Endpoint &endpoint, bool use_tls) {
                    return std::unexpected(TCPListenerError::WrongProtocol);
                  }},
       endpoint);
-  fcntl(listener->socket_.get_fd(), F_SETFL,
-        fcntl(listener->socket_.get_fd(), F_GETFL, 0) | O_NONBLOCK);
   if (!listener.has_value()) {
     spdlog::error("wrong protocol: endpoint of {} doesn't match to TCP",
                   typeid(endpoint).name());
     return listener;
   }
+  fcntl(listener->socket_.get_fd(), F_SETFL,
+        fcntl(listener->socket_.get_fd(), F_GETFL, 0) | O_NONBLOCK);
   if (EndpointManager::Bind(listener->socket_, endpoint) == -1)
     return std::unexpected(TCPListenerError::BindError);
   if (::listen(listener->socket_.get_fd(), 10) != 0) {
@@ -115,10 +115,10 @@ UDPListener::bind(const Endpoint &endpoint) {
                    return std::unexpected(UDPListenerError::WrongProtocol);
                  }},
       endpoint);
-  fcntl(listener->socket_.get_fd(), F_SETFL,
-        fcntl(listener->socket_.get_fd(), F_GETFL, 0) | O_NONBLOCK);
   if (!listener.has_value())
     return listener;
+  fcntl(listener->socket_.get_fd(), F_SETFL,
+        fcntl(listener->socket_.get_fd(), F_GETFL, 0) | O_NONBLOCK);
   if (EndpointManager::Bind(listener->socket_, endpoint) == -1)
     return std::unexpected(UDPListenerError::BindError);
   listener->endpoint_ = endpoint;

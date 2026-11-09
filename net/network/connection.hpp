@@ -1,9 +1,11 @@
 #pragma once
 #include "net/network/endpoint.hpp"
 #include "net/network/rawsocket.hpp"
+#include "net/transport/receivebuffer.hpp"
 #include "net/transport/sendbuffer.hpp"
 #include <expected>
 #include <fcntl.h>
+#include <optional>
 #include <span>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -19,6 +21,8 @@ class TCPConnection {
   Endpoint endpoint_;
 
   SendBuffer<> send_buffer_;
+
+  ReceiveBuffer receive_buffer_;
 
   TCPTransport transport_;
 
@@ -39,6 +43,10 @@ public:
 
   std::expected<std::size_t, TCPConnectionError>
   recv(std::span<std::byte> data);
+
+  IOStatus receive();
+
+  std::optional<std::vector<std::byte>> next_message();
 
   bool has_to_write() const;
 
