@@ -57,21 +57,6 @@ TCPConnection &TCPConnection::operator=(TCPConnection &&other) noexcept {
   return *this;
 }
 
-void TCPConnection::set_tls_connection() {
-  std::lock_guard<std::mutex> lock(transport_mutex_);
-  std::visit(
-      [](auto &transport) {
-        if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
-                                     TLSTransport>) {
-          transport.set_role(1);
-          do {
-            transport.connect();
-          } while (transport.state() == TLSState::Handshaking);
-        }
-      },
-      transport_);
-}
-
 ConnectionState TCPConnection::state() { return state_; }
 
 FlushResult TCPConnection::continue_handshake() {
@@ -108,31 +93,18 @@ FlushResult TCPConnection::continue_handshake() {
   return res;
 }
 
-void TCPConnection::set_tls_acception() {
-  std::lock_guard<std::mutex> lock(transport_mutex_);
-  std::visit(
-      [](auto &transport) {
-        if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
-                                     TLSTransport>) {
-          transport.set_role(0);
-          do {
-            transport.accept();
-          } while (transport.state() == TLSState::Handshaking);
-        }
-      },
-      transport_);
-}
-
 std::expected<TCPConnection, TCPConnectionError>
 TCPConnection::connect(Socket &&socket, const Endpoint &endpoint, bool use_tls,
                        Role role) {
-  auto res = EndpointManager::Connect(socket, endpoint);
-  if (res == -1) {
-    spdlog::error("error connecting to endpoint {}", (void *)&endpoint);
-    return std::unexpected(TCPConnectionError::WrongProtocol);
-  }
   fcntl(socket.get_fd(), F_SETFL,
         fcntl(socket.get_fd(), F_GETFL, 0) | O_NONBLOCK);
+  auto res = EndpointManager::Connect(socket, endpoint);
+  if (res == -1) {
+    if (errno != EINPROGRESS) {
+      spdlog::error("error connecting to endpoint {}", (void *)&endpoint);
+      return std::unexpected(TCPConnectionError::WrongProtocol);
+    }
+  }
   return TCPConnection{std::move(socket), endpoint, use_tls, role};
 }
 
@@ -176,7 +148,7 @@ TCPConnection::recv(std::span<std::byte> data) {
   FlushResult res;
   {
     std::lock_guard<std::mutex> lock(transport_mutex_);
-    auto res = std::visit(
+    res = std::visit(
         [&data](auto &transport) {
           auto res = transport.read(data);
           return res;

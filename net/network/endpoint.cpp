@@ -26,7 +26,8 @@ int EndpointManager::Connect(const Socket &socket, const Endpoint &endpoint) {
       },
       endpoint);
   if (res != 0) {
-    spdlog::error("error connecting from socket {} to endpoint {}",
+    spdlog::error("error connecting from socket {} to endpoint {} (maybe "
+                  "connection is in progress)",
                   (void *)&socket, (void *)&endpoint);
   }
   return res;

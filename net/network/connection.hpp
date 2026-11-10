@@ -72,17 +72,11 @@ public:
 
   FlushResult continue_handshake();
 
-  FlushResult handshake_step();
-
   bool has_to_write() const;
 
   FlushResult flush();
 
   const Socket &socket() const;
-
-  void set_tls_connection();
-
-  void set_tls_acception();
 
   const Endpoint &endpoint() const;
 
