@@ -19,6 +19,7 @@ struct FlushResult {
   IOStatus status;
 };
 
+enum class ConnectionState { Connecting, TlsHandshaking, Established, Closing };
 enum class TCPTransportError {
   UnknownError,
 };

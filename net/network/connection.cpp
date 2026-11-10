@@ -58,6 +58,8 @@ void TCPConnection::set_tls_connection() {
       transport_);
 }
 
+ConnectionState TCPConnection::state() { return state_; }
+
 void TCPConnection::set_tls_acception() {
   std::lock_guard<std::mutex> lock(transport_mutex_);
   std::visit(

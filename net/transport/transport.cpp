@@ -78,17 +78,9 @@ FlushResult TLSTransport::connect() {
   state_ = TLSState::Handshaking;
   switch (SSL_get_error(ssl_, ret)) {
   case SSL_ERROR_WANT_READ:
-    if (!wait_for_io(fd_, POLLIN)) {
-      state_ = TLSState::Error;
-      return {0, IOStatus::Error};
-    }
     return {0, IOStatus::WantRead};
 
   case SSL_ERROR_WANT_WRITE:
-    if (!wait_for_io(fd_, POLLOUT)) {
-      state_ = TLSState::Error;
-      return {0, IOStatus::Error};
-    }
     return {0, IOStatus::WantWrite};
 
   default:
@@ -115,17 +107,11 @@ FlushResult TLSTransport::accept() {
 
   switch (SSL_get_error(ssl_, ret)) {
   case SSL_ERROR_WANT_READ:
-    if (!wait_for_io(fd_, POLLIN)) {
-      state_ = TLSState::Error;
-      return {0, IOStatus::Error};
-    }
+
     return {0, IOStatus::WantRead};
 
   case SSL_ERROR_WANT_WRITE:
-    if (!wait_for_io(fd_, POLLOUT)) {
-      state_ = TLSState::Error;
-      return {0, IOStatus::Error};
-    }
+
     return {0, IOStatus::WantWrite};
 
   default:

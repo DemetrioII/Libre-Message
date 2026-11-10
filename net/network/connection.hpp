@@ -3,6 +3,7 @@
 #include "net/network/rawsocket.hpp"
 #include "net/transport/receivebuffer.hpp"
 #include "net/transport/sendbuffer.hpp"
+#include "net/transport/transport.hpp"
 #include <atomic>
 #include <cstdint>
 #include <expected>
@@ -33,6 +34,7 @@ class TCPConnection {
   ReceiveBuffer receive_buffer_;
 
   TCPTransport transport_;
+  ConnectionState state_;
 
   std::function<void(bool)> write_interest_handler_;
   std::atomic<bool> has_to_write_{false};
@@ -58,6 +60,12 @@ public:
   IOStatus receive();
 
   std::optional<std::vector<std::byte>> next_message();
+
+  ConnectionState state();
+
+  FlushResult continue_handshake();
+
+  FlushResult handshake_step();
 
   bool has_to_write() const;
 
