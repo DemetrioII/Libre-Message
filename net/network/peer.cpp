@@ -31,6 +31,14 @@ void TCPPeer::on_read(ConnectionId id) {
 
     connection_ptr = it->second.connection;
   }
+  if (connection_ptr->state() == ConnectionState::TlsHandshaking ||
+      connection_ptr->state() == ConnectionState::Connecting) {
+    connection_ptr->continue_handshake();
+    return;
+  } else if (connection_ptr->state() == ConnectionState::Closing) {
+    on_disconnect(id);
+    return;
+  }
   status = connection_ptr->receive();
   if (status == IOStatus::Error) {
     spdlog::error("read error on connection with id={}", id);
@@ -104,6 +112,16 @@ void TCPPeer::on_write(ConnectionId id) {
     }
 
     connection_ptr = it->second.connection;
+  }
+
+  if (connection_ptr->state() == ConnectionState::TlsHandshaking ||
+      connection_ptr->state() == ConnectionState::Connecting) {
+    connection_ptr->continue_handshake();
+    return;
+  }
+  if (connection_ptr->state() == ConnectionState::Closing) {
+    on_disconnect(id);
+    return;
   }
 
   if (!connection_ptr->has_to_write())
@@ -259,12 +277,14 @@ ConnectionId TCPPeer::connect(std::string_view host, short port,
   Endpoint endpoint = EndpointManager::Construct(ip_version, host, port);
   Socket socket =
       ::socket(ip_version == 6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0);
-  auto connection =
-      TCPConnection::connect(std::move(socket), endpoint, use_tls_);
+  auto connection = TCPConnection::connect(std::move(socket), endpoint,
+                                           use_tls_, Role::Client);
   if (!connection)
     return kInvalidConnectionId;
 
-  connection->set_tls_connection();
+  connection->continue_handshake();
+
+  // connection->set_tls_connection();
   return make_tcp_connection(std::move(*connection));
 }
 

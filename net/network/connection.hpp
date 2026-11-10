@@ -22,9 +22,15 @@ enum class TCPConnectionError {
   ReceiveError,
 };
 
+enum class Role {
+  Client,
+  Server,
+};
+
 class TCPConnection {
   Socket socket_;
   Endpoint endpoint_;
+  Role role_;
 
   std::mutex write_mutex_;
   std::mutex transport_mutex_;
@@ -34,21 +40,22 @@ class TCPConnection {
   ReceiveBuffer receive_buffer_;
 
   TCPTransport transport_;
-  ConnectionState state_;
+  ConnectionState state_{ConnectionState::Connecting};
 
   std::function<void(bool)> write_interest_handler_;
   std::atomic<bool> has_to_write_{false};
 
 public:
   TCPConnection() : socket_(-1), transport_(PlainTCPTransport(-1)) {}
-  TCPConnection(Socket &&socket, const Endpoint &endpoint, bool use_tls);
+  TCPConnection(Socket &&socket, const Endpoint &endpoint, bool use_tls,
+                Role role);
 
   TCPConnection(TCPConnection &&other) noexcept;
 
   TCPConnection &operator=(TCPConnection &&other) noexcept;
 
   static std::expected<TCPConnection, TCPConnectionError>
-  connect(Socket &&socket, const Endpoint &endpoint, bool use_tls);
+  connect(Socket &&socket, const Endpoint &endpoint, bool use_tls, Role role);
 
   void send(std::span<const std::byte> data);
 

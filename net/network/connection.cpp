@@ -18,9 +18,23 @@ TCPTransport make_transport(int fd, bool use_tls) {
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 TCPConnection::TCPConnection(Socket &&socket, const Endpoint &endpoint,
-                             bool use_tls)
-    : socket_(std::move(socket)), endpoint_(endpoint),
-      transport_(make_transport(socket_.get_fd(), use_tls)) {}
+                             bool use_tls, Role role)
+    : socket_(std::move(socket)), endpoint_(endpoint), role_(role),
+      transport_(make_transport(socket_.get_fd(), use_tls)) {
+  if (use_tls) {
+    std::visit(
+        [role](auto &transport) {
+          if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
+                                       TLSTransport>) {
+            if (role == Role::Client)
+              transport.set_role(1);
+            else
+              transport.set_role(0);
+          }
+        },
+        transport_);
+  }
+}
 
 TCPConnection::TCPConnection(TCPConnection &&other) noexcept
     : socket_(std::move(other.socket_)), endpoint_(std::move(other.endpoint_)),
@@ -60,6 +74,40 @@ void TCPConnection::set_tls_connection() {
 
 ConnectionState TCPConnection::state() { return state_; }
 
+FlushResult TCPConnection::continue_handshake() {
+  state_ = ConnectionState::TlsHandshaking;
+  FlushResult res;
+  if (role_ == Role::Client) {
+    res = std::visit(
+        [](auto &transport) {
+          if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
+                                       TLSTransport>) {
+            return transport.accept();
+          } else {
+            return FlushResult{0, IOStatus::Complete};
+          }
+        },
+        transport_);
+  } else {
+    res = std::visit(
+        [](auto &transport) {
+          if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
+                                       TLSTransport>) {
+            return transport.connect();
+          } else {
+            return FlushResult{0, IOStatus::Complete};
+          }
+        },
+        transport_);
+  }
+  if (res.status == IOStatus::Complete) {
+    state_ = ConnectionState::Established;
+  } else if (res.status == IOStatus::Error) {
+    state_ = ConnectionState::Closing;
+  }
+  return res;
+}
+
 void TCPConnection::set_tls_acception() {
   std::lock_guard<std::mutex> lock(transport_mutex_);
   std::visit(
@@ -76,8 +124,8 @@ void TCPConnection::set_tls_acception() {
 }
 
 std::expected<TCPConnection, TCPConnectionError>
-TCPConnection::connect(Socket &&socket, const Endpoint &endpoint,
-                       bool use_tls) {
+TCPConnection::connect(Socket &&socket, const Endpoint &endpoint, bool use_tls,
+                       Role role) {
   auto res = EndpointManager::Connect(socket, endpoint);
   if (res == -1) {
     spdlog::error("error connecting to endpoint {}", (void *)&endpoint);
@@ -85,7 +133,7 @@ TCPConnection::connect(Socket &&socket, const Endpoint &endpoint,
   }
   fcntl(socket.get_fd(), F_SETFL,
         fcntl(socket.get_fd(), F_GETFL, 0) | O_NONBLOCK);
-  return TCPConnection{std::move(socket), endpoint, use_tls};
+  return TCPConnection{std::move(socket), endpoint, use_tls, role};
 }
 
 void TCPConnection::send(std::span<const std::byte> data) {

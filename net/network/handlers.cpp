@@ -27,7 +27,9 @@ void TCPListenerEventHandler::handle(const Event &events) {
     return;
   }
 
-  connection->set_tls_acception();
+  connection->continue_handshake();
+
+  // connection->set_tls_acception();
 
   spdlog::info("connected peer with fd {}", connection->socket().get_fd());
   connection_callback_(std::move(*connection));

@@ -88,7 +88,7 @@ std::expected<TCPConnection, TCPListenerError> TCPListener::accept() {
       Socket{fd},
       EndpointManager::Construct(
           EndpointManager::FamilyToVersion(addr_storage.ss_family), host, port),
-      use_tls_};
+      use_tls_, Role::Server};
 }
 
 const Socket &TCPListener::socket() const { return socket_; }
