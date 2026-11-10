@@ -27,7 +27,7 @@ int main() {
 
       manager.send(recipient_id, std::move(msg_to_send));
     } else if (command == "connect") {
-      short port;
+      uint16_t port;
       std::cin >> port;
       auto res = manager.connect("127.0.0.1", port, 4);
       if (!res)

@@ -5,6 +5,9 @@ cc_library(
 	name = "event_loop",
 	srcs = glob(["*.cpp"]),
 	hdrs = glob(["*.hpp"]),
+	deps = [
+		"@spdlog//:spdlog",
+	],
 	copts = [
 		"-std=c++23",
 	],

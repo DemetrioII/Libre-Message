@@ -5,14 +5,17 @@
 #include "models/proto/message.pb.h"
 #include "net/network/peer.hpp"
 #include <expected>
+#include <mutex>
 
 enum class ManagerError { ConnectFailed };
 
 class Manager {
   SessionInfo session_info_;
-  TCPPeer peer_net_;
   ConnectionManager connection_manager_;
+  TCPPeer peer_net_;
   std::string sender_id_;
+
+  std::mutex send_mutex_;
 
 public:
   Manager(std::string_view host, uint16_t port, int version, bool use_tls);

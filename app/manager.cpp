@@ -46,12 +46,16 @@ Manager::Manager(std::string_view host, uint16_t port, int version,
     sender_id_.push_back(static_cast<char>(b));
 
   peer_net_.set_sender_id(sender_id_);
-  peer_net_.set_message_handler([this](int fd, MessageModel message) {
+  peer_net_.set_disconnect_handler([this](ConnectionId id) {
+    connection_manager_.unregister_by_id(id);
+    spdlog::info("removed recipient mapping for connection_id={}", id);
+  });
+  peer_net_.set_message_handler([this](ConnectionId id, MessageModel message) {
     if (message.is_handshake()) {
       connection_manager_.register_connection(
-          std::string{message.handshake_sender_id()}, fd);
-      spdlog::info("registered peer with id={} on fd={}",
-                   message.handshake_sender_id(), fd);
+          std::string{message.handshake_sender_id()}, id);
+      spdlog::info("registered peer with id={} on connection_id={}",
+                   message.handshake_sender_id(), id);
       return;
     }
     if (message.is_for(session_info_.session_id))
@@ -64,21 +68,25 @@ Manager::Manager(std::string_view host, uint16_t port, int version,
 
 std::expected<void, ManagerError> Manager::connect(std::string_view host,
                                                    uint16_t port, int version) {
-  int fd = -1;
-  if ((fd = peer_net_.connect(host, port, version)) == -1)
+  ConnectionId id = peer_net_.connect(host, port, version);
+  if (id == kInvalidConnectionId)
     return std::unexpected(ManagerError::ConnectFailed);
 
   return {};
 }
 
 void Manager::send(const MessageModel &message) {
-  auto fd = connection_manager_.find_fd(message.proto().recipient_id());
-  if (!fd) {
+
+  auto id = connection_manager_.find_id(message.proto().recipient_id());
+  if (!id) {
     spdlog::warn("no connection registered for recipient");
     return;
   }
-  auto data = MessageCodec::encode(message);
-  peer_net_.send_data(*fd, data);
+  {
+    std::lock_guard<std::mutex> lock(send_mutex_);
+    auto data = MessageCodec::encode(message);
+    peer_net_.send_data(*id, data);
+  }
 }
 
 void Manager::run_event_loop() { peer_net_.run_event_loop(); }

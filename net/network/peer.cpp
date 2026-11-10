@@ -12,38 +12,39 @@ static std::shared_ptr<TCPListener> bind_listener(const Endpoint &endpoint,
   return std::make_shared<TCPListener>(std::move(*listener));
 }
 
-void TCPPeer::on_read(int fd) {
+void TCPPeer::on_read(ConnectionId id) {
   IOStatus status;
   std::shared_ptr<TCPConnection> connection_ptr;
   {
     std::lock_guard<std::mutex> lock(connection_map_mutex_);
-    auto it = connections_.find(fd);
-
-    if (it == connections_.end()) {
-      spdlog::error("connection with fd={} was not found", fd);
-      on_disconnect(fd);
+    auto id_it = id_to_fd_.find(id);
+    if (id_it == id_to_fd_.end()) {
+      spdlog::debug("stale read event for connection id={}", id);
       return;
     }
 
-    connection_ptr = it->second;
+    auto it = connections_.find(id_it->second);
+    if (it == connections_.end() || it->second.id != id) {
+      spdlog::debug("stale read event for connection id={}", id);
+      return;
+    }
+
+    connection_ptr = it->second.connection;
   }
   status = connection_ptr->receive();
   if (status == IOStatus::Error) {
-    spdlog::error("read error on connection with fd={}", fd);
-    return;
-  }
-  if (status == IOStatus::Closed) {
-    spdlog::info("connection with fd={} closed", fd);
+    spdlog::error("read error on connection with id={}", id);
+    on_disconnect(id);
     return;
   }
 
   while (auto message = connection_ptr->next_message()) {
-    spdlog::info("received complete frame ({} bytes) on fd={}", message->size(),
-                 fd);
+    spdlog::info("received complete frame ({} bytes) on id={}", message->size(),
+                 id);
 
     const auto decoded = MessageCodec::decode(*message);
     if (!decoded) {
-      spdlog::warn("failed to decode message on fd={} (error {})", fd,
+      spdlog::warn("failed to decode message on id={} (error {})", id,
                    static_cast<int>(decoded.error()));
       continue;
     }
@@ -53,16 +54,26 @@ void TCPPeer::on_read(int fd) {
                    decoded->proto().sender_id(), decoded->text());
 
     if (on_message_) {
-      on_message_(fd, std::move(*decoded));
+      on_message_(id, std::move(*decoded));
     }
+  }
+
+  if (status == IOStatus::Closed) {
+    spdlog::info("connection with id={} closed", id);
+    on_disconnect(id);
   }
 }
 
-void TCPPeer::set_sender_id(std::string id) { sender_id_ = std::move(id); }
+void TCPPeer::set_sender_id(const std::string &id) { sender_id_ = id; }
 
 void TCPPeer::set_message_handler(
-    std::function<void(int, MessageModel)> handler) {
+    std::function<void(ConnectionId, MessageModel)> handler) {
   on_message_ = std::move(handler);
+}
+
+void TCPPeer::set_disconnect_handler(
+    std::function<void(ConnectionId)> handler) {
+  on_disconnect_ = std::move(handler);
 }
 
 std::vector<std::byte> TCPPeer::make_handshake_message() const {
@@ -74,16 +85,25 @@ std::vector<std::byte> TCPPeer::make_handshake_message() const {
   return MessageCodec::encode(MessageModel(std::move(m)));
 }
 
-void TCPPeer::on_write(int fd) {
+void TCPPeer::on_write(ConnectionId id) {
+  int fd = -1;
   std::shared_ptr<TCPConnection> connection_ptr;
   {
     std::lock_guard<std::mutex> lock(connection_map_mutex_);
-    auto it = connections_.find(fd);
-    if (it == connections_.end()) {
-      spdlog::error("error with fd={} was not found", fd);
+    auto id_it = id_to_fd_.find(id);
+    if (id_it == id_to_fd_.end()) {
+      spdlog::debug("stale write event for connection id={}", id);
       return;
     }
-    connection_ptr = it->second;
+
+    fd = id_it->second;
+    auto it = connections_.find(fd);
+    if (it == connections_.end() || it->second.id != id) {
+      spdlog::debug("stale write event for connection id={}", id);
+      return;
+    }
+
+    connection_ptr = it->second.connection;
   }
 
   if (!connection_ptr->has_to_write())
@@ -91,48 +111,87 @@ void TCPPeer::on_write(int fd) {
 
   auto res = connection_ptr->flush();
   if (res.status == IOStatus::Error) {
-    spdlog::error("flush error on fd={}", fd);
-    on_disconnect(fd);
+    spdlog::error("flush error on connection with id={}", id);
+    on_disconnect(id);
     return;
   }
 
-  if (!connection_ptr->has_to_write())
-    event_loop_->modify_fd(fd, EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR);
+  {
+    std::lock_guard<std::mutex> lock(connection_map_mutex_);
+    auto id_it = id_to_fd_.find(id);
+    if (id_it == id_to_fd_.end())
+      return;
+
+    auto it = connections_.find(fd);
+    if (it == connections_.end() ||
+        it->second.connection.get() != connection_ptr.get())
+      return;
+
+    if (!connection_ptr->has_to_write())
+      event_loop_->modify_fd(fd, EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR);
+  }
 }
 
-void TCPPeer::on_disconnect(int fd) {
+void TCPPeer::on_disconnect(ConnectionId id) {
+  int fd = -1;
+  std::shared_ptr<TCPConnection> connection;
+  {
+    std::lock_guard lock(connection_map_mutex_);
+    auto id_it = id_to_fd_.find(id);
+    if (id_it == id_to_fd_.end()) {
+      spdlog::debug("stale disconnect event for connection id={}", id);
+      return;
+    }
+
+    fd = id_it->second;
+    auto it = connections_.find(fd);
+    if (it == connections_.end() || it->second.id != id) {
+      spdlog::debug("stale disconnect event for connection id={}", id);
+      id_to_fd_.erase(id_it);
+      return;
+    }
+
+    connection = it->second.connection;
+    id_to_fd_.erase(id_it);
+    connections_.erase(it);
+    connection_handlers_.erase(fd);
+  }
+
   event_loop_->remove_fd(fd);
-
-  std::lock_guard<std::mutex> lock(connection_map_mutex_);
-  connections_.erase(fd);
-  connection_handlers_.erase(fd);
+  if (on_disconnect_)
+    on_disconnect_(id);
 }
 
-void TCPPeer::make_tcp_connection(TCPConnection &&connection) {
+ConnectionId TCPPeer::make_tcp_connection(TCPConnection &&connection) {
   int fd = connection.socket().get_fd();
+  ConnectionId id = kInvalidConnectionId;
   {
     std::lock_guard<std::mutex> lock{connection_map_mutex_};
+    id = next_connection_id_++;
     auto connection_ptr =
         std::make_shared<TCPConnection>(std::move(connection));
-    spdlog::info("connection with fd={} was added to map",
-                 connection_ptr->socket().get_fd());
+    spdlog::info("connection with fd={} was added with id={}", fd, id);
+
     std::shared_ptr<TCPConnectionEventHandler> event_handler =
         std::make_shared<TCPConnectionEventHandler>(
-            connection_ptr->socket().get_fd(), listener_, connection_ptr,
+            fd, listener_, connection_ptr,
             [this](int fd, uint32_t events) {
               event_loop_->modify_fd(fd, events);
             },
-            [this](int fd) { on_read(fd); }, [this](int fd) { on_write(fd); },
-            [this](int fd) { on_disconnect(fd); });
-    connection_handlers_[connection_ptr->socket().get_fd()] = event_handler;
-    event_loop_->add_fd(connection_ptr->socket().get_fd(), event_handler,
+            [this, id](int) { on_read(id); }, [this, id](int) { on_write(id); },
+            [this, id](int) { on_disconnect(id); });
+
+    connections_[fd] = ConnectionEntry{id, connection_ptr};
+    id_to_fd_[id] = fd;
+    connection_handlers_[fd] = event_handler;
+    event_loop_->add_fd(fd, event_handler,
                         EPOLLIN | EPOLLRDHUP | EPOLLERR | EPOLLHUP);
-    connections_[connection_ptr->socket().get_fd()] = connection_ptr;
   }
   if (!sender_id_.empty()) {
     std::vector<std::byte> handshake = make_handshake_message();
-    send_data(fd, handshake);
+    send_data(id, handshake);
   }
+  return id;
 }
 
 TCPPeer::TCPPeer(std::string_view host, short port, int ip_version,
@@ -149,6 +208,12 @@ TCPPeer::TCPPeer(std::string_view host, short port, int ip_version,
                       EPOLLIN | EPOLLERR);
 }
 
+TCPPeer::~TCPPeer() {
+  event_loop_jthread_.request_stop();
+  if (event_loop_jthread_.joinable())
+    event_loop_jthread_.join();
+}
+
 void TCPPeer::run_event_loop() {
   event_loop_jthread_ = std::jthread([this](std::stop_token stop_token) {
     while (!stop_token.stop_requested())
@@ -156,22 +221,31 @@ void TCPPeer::run_event_loop() {
   });
 }
 
-void TCPPeer::send_data(int fd, std::span<std::byte> data) {
+void TCPPeer::send_data(ConnectionId id, std::span<std::byte> data) {
   std::shared_ptr<TCPConnection> connection_ptr;
+  int fd = -1;
   {
     std::lock_guard<std::mutex> lock(connection_map_mutex_);
-    auto it = connections_.find(fd);
-    if (it == connections_.end()) {
-      spdlog::warn("send_data: connection with fd={} was not found", fd);
+    auto id_it = id_to_fd_.find(id);
+    if (id_it == id_to_fd_.end()) {
+      spdlog::warn("send_data: connection with id={} was not found", id);
       return;
     }
-    connection_ptr = it->second;
+
+    fd = id_it->second;
+    auto it = connections_.find(fd);
+    if (it == connections_.end() || it->second.id != id) {
+      spdlog::warn("send_data: stale connection with id={}", id);
+      return;
+    }
+
+    connection_ptr = it->second.connection;
   }
 
-  spdlog::info("sending data ({} bytes) to peer with fd={}", data.size(), fd);
+  spdlog::info("sending data ({} bytes) to peer with id={}", data.size(), id);
   connection_ptr->send(data);
-  event_loop_->modify_fd(fd,
-                         EPOLLIN | EPOLLERR | EPOLLOUT | EPOLLHUP | EPOLLRDHUP);
+  event_loop_->modify_fd(fd, EPOLLIN | EPOLLERR | EPOLLOUT | EPOLLHUP |
+                                 EPOLLRDHUP);
 }
 
 void TCPPeer::broadcast(std::span<std::byte> data) {
@@ -179,7 +253,7 @@ void TCPPeer::broadcast(std::span<std::byte> data) {
   {
     std::lock_guard<std::mutex> lock(connection_map_mutex_);
     for (const auto &[fd, connection] : connections_)
-      targets.emplace_back(fd, connection);
+      targets.emplace_back(fd, connection.connection);
   }
 
   for (const auto &[fd, connection] : targets) {
@@ -189,25 +263,24 @@ void TCPPeer::broadcast(std::span<std::byte> data) {
   }
 }
 
-int TCPPeer::connect(std::string_view host, short port, int ip_version) {
+ConnectionId TCPPeer::connect(std::string_view host, short port,
+                              int ip_version) {
   Endpoint endpoint = EndpointManager::Construct(ip_version, host, port);
   Socket socket =
       ::socket(ip_version == 6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0);
   auto connection =
       TCPConnection::connect(std::move(socket), endpoint, use_tls_);
   if (!connection)
-    return -1;
+    return kInvalidConnectionId;
 
-  int fd = connection->socket().get_fd();
   connection->set_tls_connection();
-  make_tcp_connection(std::move(*connection));
-  return fd;
+  return make_tcp_connection(std::move(*connection));
 }
 
 void TCPPeer::disconnect(std::string_view host, short port) {
-  std::lock_guard<std::mutex> lock(connection_map_mutex_);
-  int fd = -1;
+  ConnectionId id = kInvalidConnectionId;
   {
+    std::lock_guard<std::mutex> lock(connection_map_mutex_);
     auto it = std::find_if(
         connections_.begin(), connections_.end(),
         [host, port](const auto &pair) {
@@ -233,21 +306,13 @@ void TCPPeer::disconnect(std::string_view host, short port) {
 
                 return false;
               },
-              pair.second->endpoint());
+              pair.second.connection->endpoint());
         });
 
-    if (it != connections_.end()) {
-      fd = it->first;
-      connections_.erase(it);
-    }
+    if (it != connections_.end())
+      id = it->second.id;
     spdlog::info("disconnecting from peer {}:{}", host, port);
   }
-  if (fd != -1) {
-    auto it = connection_handlers_.find(fd);
-    if (it != connection_handlers_.end())
-      connection_handlers_.erase(it);
-  }
-  if (fd != -1) {
-    event_loop_->remove_fd(fd);
-  }
+  if (id != kInvalidConnectionId)
+    on_disconnect(id);
 }

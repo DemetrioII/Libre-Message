@@ -4,6 +4,7 @@ load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 
 cc_binary(
 	name = "application",
+	visibility = ["//visibility:public"],
 	copts = [
 		"-std=c++23",
 	],

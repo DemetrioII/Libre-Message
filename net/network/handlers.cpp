@@ -54,7 +54,7 @@ void TCPConnectionEventHandler::handle_disconnect() {
 }
 
 void TCPConnectionEventHandler::handle(const Event &events) {
-  if (events.events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
+  if (events.events & EPOLLERR) {
     handle_disconnect();
     on_disconnected_(fd_);
     return;
@@ -62,6 +62,12 @@ void TCPConnectionEventHandler::handle(const Event &events) {
 
   if (events.events & EPOLLIN) {
     on_readable_(fd_);
+  }
+
+  if (events.events & (EPOLLHUP | EPOLLRDHUP)) {
+    handle_disconnect();
+    on_disconnected_(fd_);
+    return;
   }
 
   if (events.events & EPOLLOUT) {

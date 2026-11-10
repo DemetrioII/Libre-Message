@@ -3,8 +3,12 @@
 #include "net/network/rawsocket.hpp"
 #include "net/transport/receivebuffer.hpp"
 #include "net/transport/sendbuffer.hpp"
+#include <atomic>
+#include <cstdint>
 #include <expected>
 #include <fcntl.h>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <sys/socket.h>
@@ -20,21 +24,23 @@ class TCPConnection {
   Socket socket_;
   Endpoint endpoint_;
 
+  std::mutex write_mutex_;
+
   SendBuffer<> send_buffer_;
 
   ReceiveBuffer receive_buffer_;
 
   TCPTransport transport_;
 
-  bool has_to_write_{false};
+  std::atomic<bool> has_to_write_{false};
 
 public:
   TCPConnection() : socket_(-1), transport_(PlainTCPTransport(-1)) {}
   TCPConnection(Socket &&socket, const Endpoint &endpoint, bool use_tls);
 
-  TCPConnection(TCPConnection &&) = default;
+  TCPConnection(TCPConnection &&other) noexcept;
 
-  TCPConnection &operator=(TCPConnection &&) = default;
+  TCPConnection &operator=(TCPConnection &&other) noexcept;
 
   static std::expected<TCPConnection, TCPConnectionError>
   connect(Socket &&socket, const Endpoint &endpoint, bool use_tls);
@@ -69,4 +75,13 @@ class UDPConnection {
 
 public:
   UDPConnection(Socket &&socket, const Endpoint &endpoint);
+};
+
+using ConnectionId = std::uint64_t;
+
+inline constexpr ConnectionId kInvalidConnectionId = 0;
+
+struct ConnectionEntry {
+  ConnectionId id;
+  std::shared_ptr<TCPConnection> connection;
 };

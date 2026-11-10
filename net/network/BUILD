@@ -1,8 +1,8 @@
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary", "cc_test")
 
 cc_library(
 	name = "network",
-	srcs = glob(["*.cpp"]),
+	srcs = glob(["*.cpp"], exclude = ["handlers_test.cpp"]),
 	hdrs = glob(["*.hpp"]),
 	copts = [
 		"-std=c++23",
@@ -17,6 +17,18 @@ cc_library(
 	],
 	visibility = [
 		"//visibility:public"
+	],
+)
+
+cc_test(
+	name = "handlers_test",
+	srcs = ["handlers_test.cpp"],
+	copts = [
+		"-std=c++23",
+	],
+	deps = [
+		":network",
+		"@googletest//:gtest_main",
 	],
 )
 

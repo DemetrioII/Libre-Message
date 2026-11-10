@@ -17,7 +17,7 @@ static bool wait_for_io(int fd, short events) {
 FlushResult PlainTCPTransport::write(std::span<const std::byte> data) {
   const auto n = ::send(fd_, data.data(), data.size(), MSG_NOSIGNAL);
 
-  if (n > 0) {
+  if (n >= 0) {
     spdlog::info("sent {} bytes to {}", data.size(), fd_);
     return {static_cast<std::size_t>(n), IOStatus::Complete};
   }
@@ -43,7 +43,7 @@ FlushResult PlainTCPTransport::read(std::span<std::byte> data) {
     }
 
     if (n == 0) {
-      break;
+      return {total, IOStatus::Closed};
     }
 
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -213,8 +213,7 @@ TLSTransport::~TLSTransport() {
 }
 
 TLSTransport::TLSTransport(TLSTransport &&other) noexcept
-    : ssl_(other.ssl_), ctx_(other.ctx_), fd_(other.fd_),
-      state_(other.state_) {
+    : ssl_(other.ssl_), ctx_(other.ctx_), fd_(other.fd_), state_(other.state_) {
 
   other.fd_ = -1;
   other.ctx_ = nullptr;

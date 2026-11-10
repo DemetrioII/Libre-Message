@@ -38,6 +38,7 @@ IOStatus ReceiveBuffer::consume(TCPTransport &transport) {
       return IOStatus::Complete;
 
     case IOStatus::Closed:
+      append(std::span(chunk.data(), res.bytes_sent));
       return IOStatus::Closed;
 
     case IOStatus::Error:

@@ -1,5 +1,6 @@
 #include "net/event_loop/event_loop.hpp"
 #include <cstring>
+#include <spdlog/spdlog.h>
 #include <stdexcept>
 
 #define MAX_EVENTS 10
@@ -38,7 +39,11 @@ void EventLoop::add_fd(int fd_to_add, std::shared_ptr<EventHandler> handler,
 void EventLoop::remove_fd(int fd) {
   epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, nullptr);
   std::lock_guard<std::mutex> lock(map_mutex_);
-  fd_to_handler_.erase(fd);
+  auto it = fd_to_handler_.find(fd);
+  if (it != fd_to_handler_.end())
+    fd_to_handler_.erase(fd);
+  else
+    spdlog::warn("fd={} was not found in the event loop", fd);
 }
 
 void EventLoop::run_once() {

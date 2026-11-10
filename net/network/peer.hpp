@@ -11,7 +11,9 @@
 class TCPPeer {
   bool use_tls_{false};
   std::mutex connection_map_mutex_;
-  std::unordered_map<int, std::shared_ptr<TCPConnection>> connections_;
+  std::unordered_map<int, ConnectionEntry> connections_;
+  std::unordered_map<ConnectionId, int> id_to_fd_;
+  ConnectionId next_connection_id_{1};
   std::unordered_map<int, std::shared_ptr<TCPConnectionEventHandler>>
       connection_handlers_;
   std::unique_ptr<EventLoop> event_loop_;
@@ -24,32 +26,39 @@ class TCPPeer {
 
   std::string sender_id_;
 
-  std::function<void(int, MessageModel)> on_message_;
+  std::function<void(ConnectionId, MessageModel)> on_message_;
 
-  void on_read(int fd);
+  std::function<void(ConnectionId)> on_disconnect_;
 
-  void on_write(int fd);
+  void on_read(ConnectionId id);
 
-  void make_tcp_connection(TCPConnection &&connection);
+  void on_write(ConnectionId id);
 
-  void on_disconnect(int fd);
+  ConnectionId make_tcp_connection(TCPConnection &&connection);
+
+  void on_disconnect(ConnectionId id);
 
   std::vector<std::byte> make_handshake_message() const;
 
 public:
   TCPPeer(std::string_view host, short port, int ip_version, bool use_tls);
 
-  int connect(std::string_view host, short port, int ip_version);
+  ~TCPPeer();
+
+  ConnectionId connect(std::string_view host, short port, int ip_version);
 
   void disconnect(std::string_view host, short port);
 
   void run_event_loop();
 
-  void send_data(int fd, std::span<std::byte> data);
+  void send_data(ConnectionId id, std::span<std::byte> data);
 
   void broadcast(std::span<std::byte> data);
 
-  void set_sender_id(std::string id);
+  void set_sender_id(const std::string &id);
 
-  void set_message_handler(std::function<void(int, MessageModel)> handler);
+  void
+  set_message_handler(std::function<void(ConnectionId, MessageModel)> handler);
+
+  void set_disconnect_handler(std::function<void(ConnectionId)> handler);
 };

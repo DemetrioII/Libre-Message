@@ -22,6 +22,26 @@ TCPConnection::TCPConnection(Socket &&socket, const Endpoint &endpoint,
     : socket_(std::move(socket)), endpoint_(endpoint),
       transport_(make_transport(socket_.get_fd(), use_tls)) {}
 
+TCPConnection::TCPConnection(TCPConnection &&other) noexcept
+    : socket_(std::move(other.socket_)),
+      endpoint_(std::move(other.endpoint_)),
+      send_buffer_(std::move(other.send_buffer_)),
+      receive_buffer_(std::move(other.receive_buffer_)),
+      transport_(std::move(other.transport_)),
+      has_to_write_(other.has_to_write_.load()) {}
+
+TCPConnection &TCPConnection::operator=(TCPConnection &&other) noexcept {
+  if (this != &other) {
+    socket_ = std::move(other.socket_);
+    endpoint_ = std::move(other.endpoint_);
+    send_buffer_ = std::move(other.send_buffer_);
+    receive_buffer_ = std::move(other.receive_buffer_);
+    transport_ = std::move(other.transport_);
+    has_to_write_.store(other.has_to_write_.load());
+  }
+  return *this;
+}
+
 void TCPConnection::set_tls_connection() {
   std::visit(
       [](auto &transport) {
@@ -67,15 +87,22 @@ void TCPConnection::send(std::span<const std::byte> data) {
   auto framed = Framer::frame(data);
   spdlog::debug("sending {} bytes ({} framed) to connection {}", data.size(),
                 framed.size(), (void *)this);
-  send_buffer_.send(framed);
-  has_to_write_ = true;
+  {
+    std::lock_guard<std::mutex> lock(write_mutex_);
+    send_buffer_.send(framed);
+    has_to_write_.store(true);
+  }
 }
 
-bool TCPConnection::has_to_write() const { return has_to_write_; }
+bool TCPConnection::has_to_write() const { return has_to_write_.load(); }
 
 FlushResult TCPConnection::flush() {
-  const auto res = send_buffer_.flush(transport_);
-  has_to_write_ = !send_buffer_.empty();
+  FlushResult res{};
+  {
+    std::lock_guard<std::mutex> lock(write_mutex_);
+    res = send_buffer_.flush(transport_);
+    has_to_write_.store(!send_buffer_.empty());
+  }
   return res;
 }
 
@@ -94,7 +121,9 @@ TCPConnection::recv(std::span<std::byte> data) {
   }
 }
 
-IOStatus TCPConnection::receive() { return receive_buffer_.consume(transport_); }
+IOStatus TCPConnection::receive() {
+  return receive_buffer_.consume(transport_);
+}
 
 std::optional<std::vector<std::byte>> TCPConnection::next_message() {
   return receive_buffer_.next_message();

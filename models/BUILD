@@ -12,6 +12,7 @@ cc_library(
 		"*.cpp",
 	], exclude = [
 		"message_codec_test.cpp",
+		"framer_test.cpp",
 	]),
 	deps = [
 		"//models/proto:message_cc_proto",
@@ -24,6 +25,18 @@ cc_library(
 cc_test(
 	name = "message_codec_test",
 	srcs = ["message_codec_test.cpp"],
+	copts = [
+		"-std=c++23",
+	],
+	deps = [
+		":models",
+		"@googletest//:gtest_main",
+	],
+)
+
+cc_test(
+	name = "framer_test",
+	srcs = ["framer_test.cpp"],
 	copts = [
 		"-std=c++23",
 	],
