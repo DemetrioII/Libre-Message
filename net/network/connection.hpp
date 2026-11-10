@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <expected>
 #include <fcntl.h>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -25,6 +26,7 @@ class TCPConnection {
   Endpoint endpoint_;
 
   std::mutex write_mutex_;
+  std::mutex transport_mutex_;
 
   SendBuffer<> send_buffer_;
 
@@ -32,6 +34,7 @@ class TCPConnection {
 
   TCPTransport transport_;
 
+  std::function<void(bool)> write_interest_handler_;
   std::atomic<bool> has_to_write_{false};
 
 public:
@@ -49,6 +52,8 @@ public:
 
   std::expected<std::size_t, TCPConnectionError>
   recv(std::span<std::byte> data);
+
+  void set_write_interest_handler(const std::function<void(bool)> &func);
 
   IOStatus receive();
 

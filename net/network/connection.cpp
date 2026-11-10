@@ -23,11 +23,11 @@ TCPConnection::TCPConnection(Socket &&socket, const Endpoint &endpoint,
       transport_(make_transport(socket_.get_fd(), use_tls)) {}
 
 TCPConnection::TCPConnection(TCPConnection &&other) noexcept
-    : socket_(std::move(other.socket_)),
-      endpoint_(std::move(other.endpoint_)),
+    : socket_(std::move(other.socket_)), endpoint_(std::move(other.endpoint_)),
       send_buffer_(std::move(other.send_buffer_)),
       receive_buffer_(std::move(other.receive_buffer_)),
       transport_(std::move(other.transport_)),
+      write_interest_handler_(std::move(other.write_interest_handler_)),
       has_to_write_(other.has_to_write_.load()) {}
 
 TCPConnection &TCPConnection::operator=(TCPConnection &&other) noexcept {
@@ -37,12 +37,14 @@ TCPConnection &TCPConnection::operator=(TCPConnection &&other) noexcept {
     send_buffer_ = std::move(other.send_buffer_);
     receive_buffer_ = std::move(other.receive_buffer_);
     transport_ = std::move(other.transport_);
+    write_interest_handler_ = std::move(other.write_interest_handler_);
     has_to_write_.store(other.has_to_write_.load());
   }
   return *this;
 }
 
 void TCPConnection::set_tls_connection() {
+  std::lock_guard<std::mutex> lock(transport_mutex_);
   std::visit(
       [](auto &transport) {
         if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
@@ -57,6 +59,7 @@ void TCPConnection::set_tls_connection() {
 }
 
 void TCPConnection::set_tls_acception() {
+  std::lock_guard<std::mutex> lock(transport_mutex_);
   std::visit(
       [](auto &transport) {
         if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
@@ -91,6 +94,7 @@ void TCPConnection::send(std::span<const std::byte> data) {
     std::lock_guard<std::mutex> lock(write_mutex_);
     send_buffer_.send(framed);
     has_to_write_.store(true);
+    write_interest_handler_(true);
   }
 }
 
@@ -100,20 +104,35 @@ FlushResult TCPConnection::flush() {
   FlushResult res{};
   {
     std::lock_guard<std::mutex> lock(write_mutex_);
-    res = send_buffer_.flush(transport_);
+    if (send_buffer_.empty()) {
+      has_to_write_.store(false);
+      write_interest_handler_(false);
+      return {0, IOStatus::Complete};
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(transport_mutex_);
+      res = send_buffer_.flush(transport_);
+    }
+
     has_to_write_.store(!send_buffer_.empty());
+    write_interest_handler_(!send_buffer_.empty());
   }
   return res;
 }
 
 std::expected<std::size_t, TCPConnectionError>
 TCPConnection::recv(std::span<std::byte> data) {
-  auto res = std::visit(
-      [&data](auto &transport) {
-        auto res = transport.read(data);
-        return res;
-      },
-      transport_);
+  FlushResult res;
+  {
+    std::lock_guard<std::mutex> lock(transport_mutex_);
+    auto res = std::visit(
+        [&data](auto &transport) {
+          auto res = transport.read(data);
+          return res;
+        },
+        transport_);
+  }
   if (res.status == IOStatus::Complete) {
     return res.bytes_sent;
   } else {
@@ -121,7 +140,13 @@ TCPConnection::recv(std::span<std::byte> data) {
   }
 }
 
+void TCPConnection::set_write_interest_handler(
+    const std::function<void(bool)> &func) {
+  write_interest_handler_ = func;
+}
+
 IOStatus TCPConnection::receive() {
+  std::lock_guard<std::mutex> lock(transport_mutex_);
   return receive_buffer_.consume(transport_);
 }
 

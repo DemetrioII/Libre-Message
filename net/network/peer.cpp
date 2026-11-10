@@ -115,21 +115,6 @@ void TCPPeer::on_write(ConnectionId id) {
     on_disconnect(id);
     return;
   }
-
-  {
-    std::lock_guard<std::mutex> lock(connection_map_mutex_);
-    auto id_it = id_to_fd_.find(id);
-    if (id_it == id_to_fd_.end())
-      return;
-
-    auto it = connections_.find(fd);
-    if (it == connections_.end() ||
-        it->second.connection.get() != connection_ptr.get())
-      return;
-
-    if (!connection_ptr->has_to_write())
-      event_loop_->modify_fd(fd, EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR);
-  }
 }
 
 void TCPPeer::on_disconnect(ConnectionId id) {
@@ -171,6 +156,11 @@ ConnectionId TCPPeer::make_tcp_connection(TCPConnection &&connection) {
     auto connection_ptr =
         std::make_shared<TCPConnection>(std::move(connection));
     spdlog::info("connection with fd={} was added with id={}", fd, id);
+    connection_ptr->set_write_interest_handler([this, fd](bool enable) {
+      event_loop_->modify_fd(
+          fd, enable ? EPOLLIN | EPOLLERR | EPOLLOUT | EPOLLHUP | EPOLLRDHUP
+                     : EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP);
+    });
 
     std::shared_ptr<TCPConnectionEventHandler> event_handler =
         std::make_shared<TCPConnectionEventHandler>(
@@ -244,8 +234,9 @@ void TCPPeer::send_data(ConnectionId id, std::span<std::byte> data) {
 
   spdlog::info("sending data ({} bytes) to peer with id={}", data.size(), id);
   connection_ptr->send(data);
-  event_loop_->modify_fd(fd, EPOLLIN | EPOLLERR | EPOLLOUT | EPOLLHUP |
-                                 EPOLLRDHUP);
+
+  // event_loop_->modify_fd(fd, EPOLLIN | EPOLLERR | EPOLLOUT | EPOLLHUP |
+  // EPOLLRDHUP);
 }
 
 void TCPPeer::broadcast(std::span<std::byte> data) {
@@ -258,8 +249,8 @@ void TCPPeer::broadcast(std::span<std::byte> data) {
 
   for (const auto &[fd, connection] : targets) {
     connection->send(data);
-    event_loop_->modify_fd(fd, EPOLLIN | EPOLLERR | EPOLLOUT | EPOLLHUP |
-                                   EPOLLRDHUP);
+    // event_loop_->modify_fd(fd, EPOLLIN | EPOLLERR | EPOLLOUT | EPOLLHUP |
+    // EPOLLRDHUP);
   }
 }
 

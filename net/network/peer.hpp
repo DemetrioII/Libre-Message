@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <utility>
 
+enum class ConnectionState { Connecting, TlsHandshaking, Established, Closing };
+
 class TCPPeer {
   bool use_tls_{false};
   std::mutex connection_map_mutex_;
@@ -18,6 +20,7 @@ class TCPPeer {
       connection_handlers_;
   std::unique_ptr<EventLoop> event_loop_;
   Endpoint endpoint_;
+  ConnectionState state_;
 
   std::shared_ptr<TCPListener> listener_;
   std::shared_ptr<TCPListenerEventHandler> tcp_listener_handler_;
