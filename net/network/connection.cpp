@@ -38,9 +38,9 @@ TCPConnection::TCPConnection(Socket &&socket, const Endpoint &endpoint,
 
 TCPConnection::TCPConnection(TCPConnection &&other) noexcept
     : socket_(std::move(other.socket_)), endpoint_(std::move(other.endpoint_)),
-      send_buffer_(std::move(other.send_buffer_)),
+      role_(other.role_), send_buffer_(std::move(other.send_buffer_)),
       receive_buffer_(std::move(other.receive_buffer_)),
-      transport_(std::move(other.transport_)),
+      transport_(std::move(other.transport_)), state_(other.state_),
       write_interest_handler_(std::move(other.write_interest_handler_)),
       has_to_write_(other.has_to_write_.load()) {}
 
@@ -48,9 +48,11 @@ TCPConnection &TCPConnection::operator=(TCPConnection &&other) noexcept {
   if (this != &other) {
     socket_ = std::move(other.socket_);
     endpoint_ = std::move(other.endpoint_);
+    role_ = other.role_;
     send_buffer_ = std::move(other.send_buffer_);
     receive_buffer_ = std::move(other.receive_buffer_);
     transport_ = std::move(other.transport_);
+    state_ = other.state_;
     write_interest_handler_ = std::move(other.write_interest_handler_);
     has_to_write_.store(other.has_to_write_.load());
   }
@@ -67,7 +69,7 @@ FlushResult TCPConnection::continue_handshake() {
         [](auto &transport) {
           if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
                                        TLSTransport>) {
-            return transport.accept();
+            return transport.connect();
           } else {
             return FlushResult{0, IOStatus::Complete};
           }
@@ -78,7 +80,7 @@ FlushResult TCPConnection::continue_handshake() {
         [](auto &transport) {
           if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
                                        TLSTransport>) {
-            return transport.connect();
+            return transport.accept();
           } else {
             return FlushResult{0, IOStatus::Complete};
           }
