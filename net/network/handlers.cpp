@@ -27,7 +27,7 @@ void TCPListenerEventHandler::handle(const Event &events) {
     return;
   }
 
-  connection->continue_handshake();
+  // connection->continue_handshake();
 
   // connection->set_tls_acception();
 

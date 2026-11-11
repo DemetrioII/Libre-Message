@@ -204,7 +204,7 @@ TLSTransport::TLSTransport(TLSTransport &&other) noexcept
   other.fd_ = -1;
   other.ctx_ = nullptr;
   other.ssl_ = nullptr;
-  other.state_ = TLSState::Handshaking;
+  other.state_ = TLSState::Closed;
 }
 
 TLSTransport &TLSTransport::operator=(TLSTransport &&other) noexcept {
@@ -221,10 +221,12 @@ TLSTransport &TLSTransport::operator=(TLSTransport &&other) noexcept {
     fd_ = other.fd_;
     ctx_ = other.ctx_;
     ssl_ = other.ssl_;
+    state_ = other.state_;
 
     other.fd_ = -1;
     other.ctx_ = nullptr;
     other.ssl_ = nullptr;
+    other.state_ = TLSState::Closed;
   }
 
   return *this;

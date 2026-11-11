@@ -40,7 +40,7 @@ class TCPConnection {
   ReceiveBuffer receive_buffer_;
 
   TCPTransport transport_;
-  ConnectionState state_{ConnectionState::Connecting};
+  std::atomic<ConnectionState> state_{ConnectionState::Connecting};
 
   std::function<void(bool)> write_interest_handler_;
   std::atomic<bool> has_to_write_{false};

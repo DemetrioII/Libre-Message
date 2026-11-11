@@ -40,7 +40,7 @@ TCPConnection::TCPConnection(TCPConnection &&other) noexcept
     : socket_(std::move(other.socket_)), endpoint_(std::move(other.endpoint_)),
       role_(other.role_), send_buffer_(std::move(other.send_buffer_)),
       receive_buffer_(std::move(other.receive_buffer_)),
-      transport_(std::move(other.transport_)), state_(other.state_),
+      transport_(std::move(other.transport_)), state_(other.state_.load()),
       write_interest_handler_(std::move(other.write_interest_handler_)),
       has_to_write_(other.has_to_write_.load()) {}
 
@@ -52,45 +52,59 @@ TCPConnection &TCPConnection::operator=(TCPConnection &&other) noexcept {
     send_buffer_ = std::move(other.send_buffer_);
     receive_buffer_ = std::move(other.receive_buffer_);
     transport_ = std::move(other.transport_);
-    state_ = other.state_;
+    state_.store(other.state_.load());
     write_interest_handler_ = std::move(other.write_interest_handler_);
     has_to_write_.store(other.has_to_write_.load());
   }
   return *this;
 }
 
-ConnectionState TCPConnection::state() { return state_; }
+ConnectionState TCPConnection::state() { return state_.load(); }
 
 FlushResult TCPConnection::continue_handshake() {
+  if (state_.load() == ConnectionState::Closing)
+    return {0, IOStatus::Error};
+  if (state_.load() == ConnectionState::Established)
+    return {0, IOStatus::Complete};
   state_ = ConnectionState::TlsHandshaking;
   FlushResult res;
-  if (role_ == Role::Client) {
-    res = std::visit(
-        [](auto &transport) {
-          if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
-                                       TLSTransport>) {
-            return transport.connect();
-          } else {
-            return FlushResult{0, IOStatus::Complete};
-          }
-        },
-        transport_);
-  } else {
-    res = std::visit(
-        [](auto &transport) {
-          if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
-                                       TLSTransport>) {
-            return transport.accept();
-          } else {
-            return FlushResult{0, IOStatus::Complete};
-          }
-        },
-        transport_);
+  {
+    std::lock_guard<std::mutex> lock(transport_mutex_);
+    if (role_ == Role::Client) {
+      res = std::visit(
+          [](auto &transport) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
+                                         TLSTransport>) {
+              return transport.connect();
+            } else {
+              return FlushResult{0, IOStatus::Complete};
+            }
+          },
+          transport_);
+    } else {
+      res = std::visit(
+          [](auto &transport) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
+                                         TLSTransport>) {
+              return transport.accept();
+            } else {
+              return FlushResult{0, IOStatus::Complete};
+            }
+          },
+          transport_);
+    }
   }
+  if (res.status == IOStatus::WantWrite ||
+      (res.status == IOStatus::Complete && has_to_write_.load())) {
+    write_interest_handler_(true);
+  } else {
+    write_interest_handler_(false);
+  }
+
   if (res.status == IOStatus::Complete) {
-    state_ = ConnectionState::Established;
+    state_.store(ConnectionState::Established);
   } else if (res.status == IOStatus::Error) {
-    state_ = ConnectionState::Closing;
+    state_.store(ConnectionState::Closing);
   }
   return res;
 }

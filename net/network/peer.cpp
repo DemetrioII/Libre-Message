@@ -31,8 +31,7 @@ void TCPPeer::on_read(ConnectionId id) {
 
     connection_ptr = it->second.connection;
   }
-  if (connection_ptr->state() == ConnectionState::TlsHandshaking ||
-      connection_ptr->state() == ConnectionState::Connecting) {
+  if (connection_ptr->state() == ConnectionState::TlsHandshaking) {
     connection_ptr->continue_handshake();
     return;
   } else if (connection_ptr->state() == ConnectionState::Closing) {
@@ -114,8 +113,18 @@ void TCPPeer::on_write(ConnectionId id) {
     connection_ptr = it->second.connection;
   }
 
-  if (connection_ptr->state() == ConnectionState::TlsHandshaking ||
-      connection_ptr->state() == ConnectionState::Connecting) {
+  if (connection_ptr->state() == ConnectionState::Connecting) {
+    int err = 0;
+    socklen_t len = sizeof(err);
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0) {
+      connection_ptr->continue_handshake();
+      return;
+    } else {
+      on_disconnect(id);
+      return;
+    }
+  }
+  if (connection_ptr->state() == ConnectionState::TlsHandshaking) {
     connection_ptr->continue_handshake();
     return;
   }
@@ -193,7 +202,9 @@ ConnectionId TCPPeer::make_tcp_connection(TCPConnection &&connection) {
     id_to_fd_[id] = fd;
     connection_handlers_[fd] = event_handler;
     event_loop_->add_fd(fd, event_handler,
-                        EPOLLIN | EPOLLRDHUP | EPOLLERR | EPOLLHUP);
+                        EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLERR | EPOLLHUP);
+
+    connection_ptr->continue_handshake();
   }
   if (!sender_id_.empty()) {
     std::vector<std::byte> handshake = make_handshake_message();
@@ -282,7 +293,7 @@ ConnectionId TCPPeer::connect(std::string_view host, short port,
   if (!connection)
     return kInvalidConnectionId;
 
-  connection->continue_handshake();
+  // connection->continue_handshake();
 
   // connection->set_tls_connection();
   return make_tcp_connection(std::move(*connection));

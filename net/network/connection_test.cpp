@@ -35,7 +35,9 @@ protected:
   TCPConnection make_connection(Role role, bool use_tls = false) {
     Socket socket(fds_[0]);
     fds_[0] = -1;
-    return TCPConnection(std::move(socket), endpoint_, use_tls, role);
+    TCPConnection connection(std::move(socket), endpoint_, use_tls, role);
+    connection.set_write_interest_handler([](bool) {});
+    return connection;
   }
 
   int fds_[2] = {-1, -1};
