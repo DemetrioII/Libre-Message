@@ -31,10 +31,15 @@ void TCPPeer::on_read(ConnectionId id) {
 
     connection_ptr = it->second.connection;
   }
-  if (connection_ptr->state() == ConnectionState::TlsHandshaking) {
-    connection_ptr->continue_handshake();
+  const auto state = connection_ptr->state();
+  if (state == ConnectionState::Connecting) {
+    spdlog::debug("read event before connect completion for connection id={}",
+                  id);
     return;
-  } else if (connection_ptr->state() == ConnectionState::Closing) {
+  } else if (state == ConnectionState::TlsHandshaking) {
+    handle_handshake_result(id, connection_ptr->continue_handshake());
+    return;
+  } else if (state == ConnectionState::Closing) {
     on_disconnect(id);
     return;
   }
@@ -44,6 +49,8 @@ void TCPPeer::on_read(ConnectionId id) {
     on_disconnect(id);
     return;
   }
+  if (status == IOStatus::Complete)
+    mark_activity(id);
 
   while (auto message = connection_ptr->next_message()) {
     spdlog::info("received complete frame ({} bytes) on id={}", message->size(),
@@ -113,22 +120,23 @@ void TCPPeer::on_write(ConnectionId id) {
     connection_ptr = it->second.connection;
   }
 
-  if (connection_ptr->state() == ConnectionState::Connecting) {
+  const auto state = connection_ptr->state();
+  if (state == ConnectionState::Connecting) {
     int err = 0;
     socklen_t len = sizeof(err);
     if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0) {
-      connection_ptr->continue_handshake();
+      handle_handshake_result(id, connection_ptr->continue_handshake());
       return;
     } else {
       on_disconnect(id);
       return;
     }
   }
-  if (connection_ptr->state() == ConnectionState::TlsHandshaking) {
-    connection_ptr->continue_handshake();
+  if (state == ConnectionState::TlsHandshaking) {
+    handle_handshake_result(id, connection_ptr->continue_handshake());
     return;
   }
-  if (connection_ptr->state() == ConnectionState::Closing) {
+  if (state == ConnectionState::Closing) {
     on_disconnect(id);
     return;
   }
@@ -137,6 +145,8 @@ void TCPPeer::on_write(ConnectionId id) {
     return;
 
   auto res = connection_ptr->flush();
+  if (res.bytes_sent > 0)
+    mark_activity(id);
   if (res.status == IOStatus::Error) {
     spdlog::error("flush error on connection with id={}", id);
     on_disconnect(id);
@@ -144,9 +154,136 @@ void TCPPeer::on_write(ConnectionId id) {
   }
 }
 
+void TCPPeer::maybe_cancel_establishment_timer(ConnectionId id) {
+  std::optional<TimerId> timer;
+  {
+    std::lock_guard<std::mutex> lock(connection_map_mutex_);
+    auto id_it = id_to_fd_.find(id);
+    if (id_it == id_to_fd_.end())
+      return;
+
+    auto it = connections_.find(id_it->second);
+    if (it == connections_.end() || it->second.id != id)
+      return;
+
+    if (it->second.connection->state() != ConnectionState::Established)
+      return;
+
+    timer = it->second.establishment_timer;
+    it->second.establishment_timer.reset();
+  }
+
+  if (timer)
+    event_loop_->cancel_timer(*timer);
+}
+
+void TCPPeer::on_established(ConnectionId id) {
+  std::lock_guard<std::mutex> lock(connection_map_mutex_);
+  auto id_it = id_to_fd_.find(id);
+  if (id_it == id_to_fd_.end())
+    return;
+
+  auto it = connections_.find(id_it->second);
+  if (it == connections_.end() || it->second.id != id)
+    return;
+
+  if (it->second.connection->state() != ConnectionState::Established)
+    return;
+
+  if (it->second.idle_timer ||
+      options_.idle_timeout <= std::chrono::milliseconds::zero())
+    return;
+
+  it->second.last_activity = TimerQueue::Clock::now();
+  it->second.idle_timer = event_loop_->schedule_timer(
+      it->second.last_activity + options_.idle_timeout,
+      [this, id] { on_idle_timeout(id); });
+}
+
+void TCPPeer::on_idle_timeout(ConnectionId id) {
+  {
+    std::lock_guard<std::mutex> lock(connection_map_mutex_);
+    auto id_it = id_to_fd_.find(id);
+    if (id_it == id_to_fd_.end())
+      return;
+
+    auto it = connections_.find(id_it->second);
+    if (it == connections_.end() || it->second.id != id)
+      return;
+
+    it->second.idle_timer.reset();
+
+    if (it->second.connection->state() != ConnectionState::Established)
+      return;
+
+    const auto now = TimerQueue::Clock::now();
+    if (now - it->second.last_activity < options_.idle_timeout) {
+      it->second.idle_timer = event_loop_->schedule_timer(
+          it->second.last_activity + options_.idle_timeout,
+          [this, id] { on_idle_timeout(id); });
+      return;
+    }
+  }
+
+  spdlog::warn("idle timeout for connection id={}", id);
+  on_disconnect(id);
+}
+
+void TCPPeer::mark_activity(ConnectionId id) {
+  std::lock_guard<std::mutex> lock(connection_map_mutex_);
+  auto id_it = id_to_fd_.find(id);
+  if (id_it == id_to_fd_.end())
+    return;
+
+  auto it = connections_.find(id_it->second);
+  if (it == connections_.end() || it->second.id != id)
+    return;
+
+  it->second.last_activity = TimerQueue::Clock::now();
+}
+
+void TCPPeer::handle_handshake_result(ConnectionId id,
+                                      const FlushResult &result) {
+  if (result.status == IOStatus::Complete) {
+    maybe_cancel_establishment_timer(id);
+    on_established(id);
+  } else if (result.status == IOStatus::Closed ||
+             result.status == IOStatus::Error) {
+    on_disconnect(id);
+  }
+}
+
+void TCPPeer::on_establishment_timeout(ConnectionId id) {
+  std::shared_ptr<TCPConnection> connection;
+  {
+    std::lock_guard<std::mutex> lock(connection_map_mutex_);
+    auto id_it = id_to_fd_.find(id);
+    if (id_it == id_to_fd_.end())
+      return;
+
+    auto it = connections_.find(id_it->second);
+    if (it == connections_.end() || it->second.id != id)
+      return;
+
+    connection = it->second.connection;
+    it->second.establishment_timer.reset();
+  }
+
+  const auto state = connection->state();
+  if (state != ConnectionState::Connecting &&
+      state != ConnectionState::TlsHandshaking) {
+    return;
+  }
+
+  spdlog::warn("establishment timeout for connection id={}", id);
+  on_disconnect(id);
+}
+
 void TCPPeer::on_disconnect(ConnectionId id) {
   int fd = -1;
   std::shared_ptr<TCPConnection> connection;
+  std::optional<TimerId> establishment_timer;
+  std::optional<TimerId> idle_timer;
   {
     std::lock_guard lock(connection_map_mutex_);
     auto id_it = id_to_fd_.find(id);
@@ -164,10 +301,17 @@ void TCPPeer::on_disconnect(ConnectionId id) {
     }
 
     connection = it->second.connection;
+    establishment_timer = it->second.establishment_timer;
+    idle_timer = it->second.idle_timer;
     id_to_fd_.erase(id_it);
     connections_.erase(it);
     connection_handlers_.erase(fd);
   }
+
+  if (establishment_timer)
+    event_loop_->cancel_timer(*establishment_timer);
+  if (idle_timer)
+    event_loop_->cancel_timer(*idle_timer);
 
   event_loop_->remove_fd(fd);
   if (on_disconnect_)
@@ -201,10 +345,16 @@ ConnectionId TCPPeer::make_tcp_connection(TCPConnection &&connection) {
     connections_[fd] = ConnectionEntry{id, connection_ptr};
     id_to_fd_[id] = fd;
     connection_handlers_[fd] = event_handler;
+
+    if (options_.establishment_timeout > std::chrono::milliseconds::zero()) {
+      auto timer = event_loop_->schedule_timer(
+          TimerQueue::Clock::now() + options_.establishment_timeout,
+          [this, id] { on_establishment_timeout(id); });
+      connections_[fd].establishment_timer = timer;
+    }
+
     event_loop_->add_fd(fd, event_handler,
                         EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLERR | EPOLLHUP);
-
-    connection_ptr->continue_handshake();
   }
   if (!sender_id_.empty()) {
     std::vector<std::byte> handshake = make_handshake_message();
@@ -214,8 +364,9 @@ ConnectionId TCPPeer::make_tcp_connection(TCPConnection &&connection) {
 }
 
 TCPPeer::TCPPeer(std::string_view host, short port, int ip_version,
-                 bool use_tls)
-    : use_tls_(use_tls), event_loop_(std::make_unique<EventLoop>()),
+                 bool use_tls, TCPPeerOptions options)
+    : use_tls_(use_tls), options_(options),
+      event_loop_(std::make_unique<EventLoop>()),
       endpoint_(EndpointManager::Construct(ip_version, host, port)),
       listener_(bind_listener(endpoint_, use_tls_)),
       tcp_listener_handler_(std::make_shared<TCPListenerEventHandler>(
@@ -229,6 +380,7 @@ TCPPeer::TCPPeer(std::string_view host, short port, int ip_version,
 
 TCPPeer::~TCPPeer() {
   event_loop_jthread_.request_stop();
+  event_loop_->wakeup();
   if (event_loop_jthread_.joinable())
     event_loop_jthread_.join();
 }
@@ -263,6 +415,7 @@ void TCPPeer::send_data(ConnectionId id, std::span<std::byte> data) {
 
   spdlog::info("sending data ({} bytes) to peer with id={}", data.size(), id);
   connection_ptr->send(data);
+  mark_activity(id);
 
   // event_loop_->modify_fd(fd, EPOLLIN | EPOLLERR | EPOLLOUT | EPOLLHUP |
   // EPOLLRDHUP);

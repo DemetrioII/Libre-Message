@@ -4,12 +4,19 @@
 #include "net/network/handlers.hpp"
 #include "net/network/listener.hpp"
 #include <algorithm>
+#include <chrono>
 #include <thread>
 #include <unordered_map>
 #include <utility>
 
+struct TCPPeerOptions {
+  std::chrono::milliseconds establishment_timeout{10'000};
+  std::chrono::milliseconds idle_timeout{0};
+};
+
 class TCPPeer {
   bool use_tls_{false};
+  TCPPeerOptions options_;
   std::mutex connection_map_mutex_;
   std::unordered_map<int, ConnectionEntry> connections_;
   std::unordered_map<ConnectionId, int> id_to_fd_;
@@ -38,10 +45,23 @@ class TCPPeer {
 
   void on_disconnect(ConnectionId id);
 
+  void on_establishment_timeout(ConnectionId id);
+
+  void on_established(ConnectionId id);
+
+  void on_idle_timeout(ConnectionId id);
+
+  void mark_activity(ConnectionId id);
+
+  void maybe_cancel_establishment_timer(ConnectionId id);
+
+  void handle_handshake_result(ConnectionId id, const FlushResult &result);
+
   std::vector<std::byte> make_handshake_message() const;
 
 public:
-  TCPPeer(std::string_view host, short port, int ip_version, bool use_tls);
+  TCPPeer(std::string_view host, short port, int ip_version, bool use_tls,
+          TCPPeerOptions options = {});
 
   ~TCPPeer();
 

@@ -1,4 +1,7 @@
 #include "net/event_loop/event_loop.hpp"
+#include <algorithm>
+#include <cerrno>
+#include <cstdint>
 #include <cstring>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
@@ -47,11 +50,25 @@ void EventLoop::remove_fd(int fd) {
 }
 
 void EventLoop::run_once() {
+  int timeout_ms = 100;
+  if (auto next = timer_queue_.next_deadline()) {
+    const auto now = TimerQueue::Clock::now();
+    if (*next <= now) {
+      timeout_ms = 0;
+    } else {
+      const auto remaining =
+          std::chrono::ceil<std::chrono::milliseconds>(*next - now).count();
+      timeout_ms = static_cast<int>(std::min<std::int64_t>(remaining, 100));
+    }
+  }
+
   epoll_event events[MAX_EVENTS] = {};
-  int nfds = epoll_wait(epollfd, events, MAX_EVENTS, 100);
+  int nfds = epoll_wait(epollfd, events, MAX_EVENTS, timeout_ms);
   if (nfds == -1) {
-    if (errno == EINTR)
+    if (errno == EINTR) {
+      timer_queue_.run_expired(TimerQueue::Clock::now());
       return;
+    }
     throw std::runtime_error("epoll_wait failed: " +
                              std::string(strerror(errno)));
   }
@@ -79,6 +96,8 @@ void EventLoop::run_once() {
       handler->handle({.fd = tmp_fd, .events = event_mask});
     }
   }
+
+  timer_queue_.run_expired(TimerQueue::Clock::now());
 }
 
 void EventLoop::modify_fd(int fd, uint32_t events) {
@@ -87,6 +106,28 @@ void EventLoop::modify_fd(int fd, uint32_t events) {
   ev.data.fd = fd;
   epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &ev);
 }
+
+void EventLoop::wakeup() {
+  std::uint64_t one = 1;
+  while (::write(wakeupfd, &one, sizeof(one)) == -1) {
+    if (errno == EINTR)
+      continue;
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+      return;
+    spdlog::error("eventfd wakeup failed: {}", strerror(errno));
+    return;
+  }
+}
+
+TimerId EventLoop::schedule_timer(TimerQueue::TimePoint deadline,
+                                  TimerQueue::Callback callback) {
+  auto result = timer_queue_.schedule(deadline, std::move(callback));
+  if (result.became_earlier)
+    wakeup();
+  return result.id;
+}
+
+bool EventLoop::cancel_timer(TimerId id) { return timer_queue_.cancel(id); }
 
 EventLoop::~EventLoop() {
   for (auto &[fd, handler] : fd_to_handler_) {

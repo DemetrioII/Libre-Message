@@ -1,5 +1,8 @@
 #pragma once
 #include "net/event_loop/event_handler.hpp"
+#include "net/event_loop/timer_queue.hpp"
+#include <chrono>
+#include <functional>
 #include <memory>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -12,6 +15,7 @@ class EventLoop {
   int wakeupfd{-1};
   std::mutex map_mutex_;
   std::unordered_map<int, std::weak_ptr<EventHandler>> fd_to_handler_;
+  TimerQueue timer_queue_;
 
 public:
   EventLoop();
@@ -24,6 +28,13 @@ public:
   void modify_fd(int fd, uint32_t events);
 
   void run_once();
+
+  void wakeup();
+
+  TimerId schedule_timer(TimerQueue::TimePoint deadline,
+                         TimerQueue::Callback callback);
+
+  bool cancel_timer(TimerId id);
 
   ~EventLoop();
 };

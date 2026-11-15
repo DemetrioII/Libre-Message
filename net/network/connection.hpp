@@ -1,10 +1,12 @@
 #pragma once
+#include "net/event_loop/timer_id.hpp"
 #include "net/network/endpoint.hpp"
 #include "net/network/rawsocket.hpp"
 #include "net/transport/receivebuffer.hpp"
 #include "net/transport/sendbuffer.hpp"
 #include "net/transport/transport.hpp"
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <fcntl.h>
@@ -98,4 +100,7 @@ inline constexpr ConnectionId kInvalidConnectionId = 0;
 struct ConnectionEntry {
   ConnectionId id;
   std::shared_ptr<TCPConnection> connection;
+  std::optional<TimerId> establishment_timer;
+  std::optional<TimerId> idle_timer;
+  std::chrono::steady_clock::time_point last_activity{};
 };
