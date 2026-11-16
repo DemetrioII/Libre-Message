@@ -2,7 +2,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_binary", "cc_test")
 
 cc_library(
 	name = "network",
-	srcs = glob(["*.cpp"], exclude = ["handlers_test.cpp", "connection_test.cpp", "peer_timeout_test.cpp"]),
+	srcs = glob(["*.cpp"], exclude = ["handlers_test.cpp", "connection_test.cpp", "connection_concurrency_test.cpp", "peer_timeout_test.cpp", "peer_send_concurrency_test.cpp"]),
 	hdrs = glob(["*.hpp"]),
 	copts = [
 		"-std=c++23",
@@ -45,8 +45,38 @@ cc_test(
 )
 
 cc_test(
+	name = "connection_concurrency_test",
+	srcs = ["connection_concurrency_test.cpp"],
+	copts = [
+		"-std=c++23",
+	],
+	linkopts = [
+		"-pthread",
+	],
+	deps = [
+		":network",
+		"@googletest//:gtest_main",
+	],
+)
+
+cc_test(
 	name = "peer_timeout_test",
 	srcs = ["peer_timeout_test.cpp"],
+	copts = [
+		"-std=c++23",
+	],
+	linkopts = [
+		"-pthread",
+	],
+	deps = [
+		":network",
+		"@googletest//:gtest_main",
+	],
+)
+
+cc_test(
+	name = "peer_send_concurrency_test",
+	srcs = ["peer_send_concurrency_test.cpp"],
 	copts = [
 		"-std=c++23",
 	],
