@@ -290,6 +290,58 @@ protected:
     Proc c_;
 };
 
+TEST_F(E2ETest, ContactQrImportRequiresConfirmationPersistsAndRejectsKeyChange) {
+    auto [port_a, port_b] = reserve_two_ports();
+    ASSERT_NE(port_a, 0);
+    ASSERT_NE(port_b, 0);
+    a_ = start(work_ / "a", port_a);
+    b_ = start(work_ / "b", port_b);
+    ASSERT_TRUE(wait_for(a_, "Listening on 127.0.0.1:", 5000));
+    ASSERT_TRUE(wait_for(b_, "Listening on 127.0.0.1:", 5000));
+    const auto id_a = read_id(work_ / "a");
+    ASSERT_TRUE(is_valid_user_id(id_a));
+
+    const auto png = work_ / "contact with spaces.png";
+    send_cmd(a_, "contact-export \"" + png.string() + "\"");
+    ASSERT_TRUE(wait_for(a_, "Contact QR exported to " + png.string(), 5000))
+        << read_file(a_.out);
+    ASSERT_TRUE(std::filesystem::exists(png));
+
+    send_cmd(b_, "contact-import \"" + png.string() + "\"\nno");
+    ASSERT_TRUE(wait_for(b_, "Contact import cancelled", 5000)) << read_file(b_.out);
+    EXPECT_FALSE(std::filesystem::exists(work_ / "b" / "trusted_contacts"));
+
+    send_cmd(b_, "contact-import \"" + png.string() + "\"\nyes");
+    ASSERT_TRUE(wait_for(b_, "Trusted contact saved: " + id_a, 5000)) << read_file(b_.out);
+    const auto saved = read_file(work_ / "b" / "trusted_contacts");
+    EXPECT_EQ(saved.substr(0, 17), id_a + " ");
+    ASSERT_EQ(saved.size(), 82u);
+
+    stop(b_);
+    b_ = start(work_ / "b", port_b);
+    ASSERT_TRUE(wait_for(b_, "Listening on 127.0.0.1:", 5000)) << read_file(b_.out);
+    send_cmd(b_, "contact-import \"" + png.string() + "\"\nyes");
+    ASSERT_TRUE(wait_for(b_, "Trusted contact saved: " + id_a, 5000));
+    EXPECT_EQ(read_file(work_ / "b" / "trusted_contacts"), saved);
+
+    // Keep the ID but replace its key, then try to import the changed invitation.
+    const auto dir = work_ / "a";
+    const auto command = "openssl req -x509 -newkey rsa:2048 -nodes -days 1 "
+        "-subj /CN=changed -keyout " + shell_quote(dir / "server.key") +
+        " -out " + shell_quote(dir / "server.crt") + " >/dev/null 2>&1";
+    ASSERT_EQ(std::system(command.c_str()), 0);
+    const auto changed = work_ / "changed.png";
+    send_cmd(a_, "contact-export " + changed.string());
+    ASSERT_TRUE(wait_for(a_, "Contact QR exported to " + changed.string(), 5000));
+    send_cmd(b_, "contact-import " + changed.string() + "\nyes");
+    ASSERT_TRUE(wait_for(b_, "Contact already has a different trusted key", 5000))
+        << read_file(b_.out);
+    EXPECT_EQ(read_file(work_ / "b" / "trusted_contacts"), saved);
+
+    send_cmd(a_, "contact-import \"" + png.string() + "\"\nyes");
+    ASSERT_TRUE(wait_for(a_, "Cannot import your own contact ID", 5000));
+}
+
 TEST_F(E2ETest, TwoPeersExchangeMessages) {
     auto [port_a, port_b] = reserve_two_ports();
     ASSERT_NE(port_a, 0);

@@ -33,8 +33,8 @@ public:
   PlainTCPTransport(const PlainTCPTransport &other) = delete;
   PlainTCPTransport &operator=(const PlainTCPTransport &) = delete;
 
-  PlainTCPTransport(PlainTCPTransport &&) = default;
-  PlainTCPTransport &operator=(PlainTCPTransport &&) = default;
+  PlainTCPTransport(PlainTCPTransport &&other) noexcept;
+  PlainTCPTransport &operator=(PlainTCPTransport &&other) noexcept;
   FlushResult write(std::span<const std::byte> data);
   FlushResult read(std::span<std::byte> data);
 

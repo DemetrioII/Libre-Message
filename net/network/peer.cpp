@@ -40,6 +40,21 @@ void TCPPeer::on_read(ConnectionId id) {
     handle_handshake_result(id, connection_ptr->continue_handshake());
     return;
   } else if (state == ConnectionState::Closing) {
+    while (auto message = connection_ptr->next_message()) {
+      spdlog::info("received complete frame ({} bytes) on id={}",
+                   message->size(), id);
+
+      const auto decoded = MessageCodec::decode(*message);
+      if (!decoded) {
+        spdlog::warn("failed to decode message on id={} (error {})", id,
+                     static_cast<int>(decoded.error()));
+        continue;
+      }
+
+      if (on_message_) {
+        on_message_(id, std::move(*decoded));
+      }
+    }
     on_disconnect(id);
     return;
   }
@@ -62,10 +77,6 @@ void TCPPeer::on_read(ConnectionId id) {
                    static_cast<int>(decoded.error()));
       continue;
     }
-
-    if (decoded->is_text())
-      spdlog::info("received text message from {}: {}",
-                   decoded->proto().sender_id(), decoded->text());
 
     if (on_message_) {
       on_message_(id, std::move(*decoded));

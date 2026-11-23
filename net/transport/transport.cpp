@@ -33,6 +33,22 @@ FlushResult PlainTCPTransport::write(std::span<const std::byte> data) {
   return {0, IOStatus::Error};
 }
 
+PlainTCPTransport::PlainTCPTransport(PlainTCPTransport &&other) noexcept
+    : fd_(other.fd_) {
+  other.fd_ = -1;
+}
+
+PlainTCPTransport &
+PlainTCPTransport::operator=(PlainTCPTransport &&other) noexcept {
+  if (this != &other) {
+    if (fd_ >= 0)
+      shutdown(fd_, SHUT_WR);
+    fd_ = other.fd_;
+    other.fd_ = -1;
+  }
+  return *this;
+}
+
 FlushResult PlainTCPTransport::read(std::span<std::byte> data) {
   std::size_t total = 0;
   while (total < data.size()) {
@@ -63,7 +79,10 @@ FlushResult PlainTCPTransport::read(std::span<std::byte> data) {
   return {total, IOStatus::Complete};
 }
 
-PlainTCPTransport::~PlainTCPTransport() {}
+PlainTCPTransport::~PlainTCPTransport() {
+  if (fd_ >= 0)
+    shutdown(fd_, SHUT_WR);
+}
 
 TLSState TLSTransport::state() const noexcept { return state_; }
 

@@ -3,9 +3,11 @@
 #include <expected>
 #include <fstream>
 #include <spdlog/spdlog.h>
+#include <stdexcept>
 #include <vector>
 
 static constexpr const char *kUserIdFile = "user_id";
+static constexpr const char *kTrustedContactsFile = "trusted_contacts";
 
 static bool is_valid_user_id(const std::vector<std::byte> &id) {
   for (std::byte b : id) {
@@ -44,6 +46,13 @@ Manager::Manager(std::string_view host, uint16_t port, int version,
       peer_net_(host, port, version, use_tls) {
   for (std::byte b : session_info_.session_id)
     sender_id_.push_back(static_cast<char>(b));
+
+  std::error_code file_error;
+  const bool has_contacts =
+      std::filesystem::exists(kTrustedContactsFile, file_error);
+  if (file_error ||
+      (has_contacts && !trusted_contacts_.load(kTrustedContactsFile)))
+    throw std::runtime_error("Cannot load trusted contacts file");
 
   peer_net_.set_sender_id(sender_id_);
   peer_net_.set_disconnect_handler([this](ConnectionId id) {
@@ -91,6 +100,34 @@ void Manager::send(const MessageModel &message) {
 
 void Manager::run_event_loop() { peer_net_.run_event_loop(); }
 
+std::expected<void, ContactError>
+Manager::export_contact(const std::filesystem::path &png) const {
+  const auto invitation = own_contact();
+  if (!invitation)
+    return std::unexpected(invitation.error());
+  return write_contact_qr(*invitation, png);
+}
+
+std::expected<void, ContactError>
+Manager::trust_contact(const ContactInvitation &invitation) {
+  if (!invitation.encode())
+    return std::unexpected(ContactError::InvalidInvitation);
+  if (invitation.user_id == sender_id_)
+    return std::unexpected(ContactError::SelfContact);
+
+  const auto previous = trusted_contacts_.find(invitation.user_id);
+  const auto added =
+      trusted_contacts_.add(invitation.user_id, invitation.fingerprint);
+  if (!added)
+    return std::unexpected(ContactError::KeyConflict);
+  if (!trusted_contacts_.save(kTrustedContactsFile)) {
+    if (!previous)
+      trusted_contacts_.remove(invitation.user_id);
+    return std::unexpected(ContactError::IoError);
+  }
+  return {};
+}
+
 void Manager::send(std::string_view recipient_id, std::string &&msg_to_send) {
   libre_message::Message message;
   message.set_id("demo");
@@ -101,4 +138,8 @@ void Manager::send(std::string_view recipient_id, std::string &&msg_to_send) {
   message.mutable_text()->set_text(msg_to_send);
   message.set_timestamp(0);
   send(MessageModel(std::move(message)));
+}
+
+std::expected<ContactInvitation, ContactError> Manager::own_contact() const {
+  return make_contact_invitation(sender_id_, "server.crt", "server.key");
 }

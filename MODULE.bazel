@@ -16,3 +16,24 @@ bazel_dep(name = "protobuf", version="36.1.bcr.1")
 
 bazel_dep(name = "googletest", version = "1.18.0")
 
+bazel_dep(name = "stb", version = "0.0.0-20251026-f1c79c0")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "qrcodegen",
+    type = "tar.gz",
+    urls = ["https://codeload.github.com/nayuki/QR-Code-generator/tar.gz/refs/tags/v1.8.0"],
+    sha256 = "2ec0a4d33d6f521c942eeaf473d42d5fe139abcfa57d2beffe10c5cf7d34ae60",
+    strip_prefix = "QR-Code-generator-1.8.0",
+    build_file = "//third_party:qrcodegen.BUILD",
+)
+
+http_archive(
+    name = "quirc",
+    type = "tar.gz",
+    urls = ["https://codeload.github.com/dlbeer/quirc/tar.gz/refs/tags/v1.2"],
+    sha256 = "73c12ea33d337ec38fb81218c7674f57dba7ec0570bddd5c7f7a977c0deb64c5",
+    strip_prefix = "quirc-1.2",
+    build_file = "//third_party:quirc.BUILD",
+)

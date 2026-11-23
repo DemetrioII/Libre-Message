@@ -1,5 +1,6 @@
 #pragma once
 #include "app/connection_manager.hpp"
+#include "app/contact_qr.hpp"
 #include "app/session.hpp"
 #include "models/message.hpp"
 #include "models/proto/message.pb.h"
@@ -12,6 +13,7 @@ enum class ManagerError { ConnectFailed };
 class Manager {
   SessionInfo session_info_;
   ConnectionManager connection_manager_;
+  TrustedContacts trusted_contacts_;
   TCPPeer peer_net_;
   std::string sender_id_;
 
@@ -29,4 +31,13 @@ public:
   void send(std::string_view, std::string &&msg_to_send);
 
   void run_event_loop();
+
+  std::expected<void, ContactError>
+  export_contact(const std::filesystem::path &png) const;
+
+  // Called only after the user has confirmed the displayed invitation.
+  std::expected<void, ContactError>
+  trust_contact(const ContactInvitation &invitation);
+
+  std::expected<ContactInvitation, ContactError> own_contact() const;
 };
