@@ -5,6 +5,10 @@ cc_library(
 	copts = [
 		"-std=c++23",
 	],
+	linkopts = [
+		"-lssl",
+		"-lcrypto"
+	],
 	hdrs = glob([
 		"*.hpp",
 	]),
@@ -28,6 +32,10 @@ cc_test(
 	copts = [
 		"-std=c++23",
 	],
+	linkopts = [
+		"-lssl",
+		"-lcrypto"
+	],
 	deps = [
 		":models",
 		"@googletest//:gtest_main",
@@ -39,6 +47,10 @@ cc_test(
 	srcs = ["framer_test.cpp"],
 	copts = [
 		"-std=c++23",
+	],
+	linkopts = [
+		"-lssl",
+		"-lcrypto"
 	],
 	deps = [
 		":models",

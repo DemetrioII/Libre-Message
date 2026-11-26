@@ -9,6 +9,7 @@
 #include <iostream>
 #include <list>
 #include <spdlog/spdlog.h>
+#include <sstream>
 #include <vector>
 
 int main() {
@@ -72,6 +73,33 @@ int main() {
                       contact_error_message(result.error()));
       else
         std::cout << "Trusted contact saved: " << invitation->user_id << '\n';
+    } else if (command == "contact-check") {
+      std::string arguments;
+      std::getline(std::cin, arguments);
+      std::istringstream input(arguments);
+      std::string user_id;
+      std::string fingerprint;
+      std::string extra;
+      if (!(input >> user_id >> fingerprint) || (input >> extra)) {
+        std::cout << "Invalid contact data\n";
+        continue;
+      }
+      const auto result = manager.check_contact(user_id, fingerprint);
+      if (!result) {
+        std::cout << "Invalid contact data\n";
+        continue;
+      }
+      switch (*result) {
+      case ContactCheckResult::Match:
+        std::cout << "Trusted key matches\n";
+        break;
+      case ContactCheckResult::UnknownContact:
+        std::cout << "Unknown contact\n";
+        break;
+      case ContactCheckResult::KeyMismatch:
+        std::cout << "Key mismatch\n";
+        break;
+      }
     } else if (command == "contact-show") {
       auto invitation = manager.own_contact();
       if (!invitation.has_value()) {

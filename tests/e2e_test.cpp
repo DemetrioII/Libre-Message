@@ -342,6 +342,46 @@ TEST_F(E2ETest, ContactQrImportRequiresConfirmationPersistsAndRejectsKeyChange) 
     ASSERT_TRUE(wait_for(a_, "Cannot import your own contact ID", 5000));
 }
 
+TEST_F(E2ETest, ContactCheckReportsAllResultsWithoutChangingContacts) {
+    const std::string id = "0123456789abcdef";
+    const std::string fingerprint(64, 'a');
+    const std::string saved = id + " " + fingerprint + "\n";
+    const auto contacts_path = work_ / "a" / "trusted_contacts";
+    {
+        std::ofstream output(contacts_path);
+        output << saved;
+        output.close();
+        ASSERT_TRUE(output);
+    }
+    auto [port, unused] = reserve_two_ports();
+    ASSERT_NE(port, 0);
+    a_ = start(work_ / "a", port);
+    ASSERT_TRUE(wait_for(a_, "Listening on 127.0.0.1:", 5000));
+
+    send_cmd(a_, "contact-check " + id + " " + fingerprint);
+    ASSERT_TRUE(wait_for(a_, "Trusted key matches", 5000));
+    send_cmd(a_, "contact-check " + id + " " + std::string(64, 'b'));
+    ASSERT_TRUE(wait_for(a_, "Key mismatch", 5000));
+    send_cmd(a_, "contact-check fedcba9876543210 " + fingerprint);
+    ASSERT_TRUE(wait_for(a_, "Unknown contact", 5000));
+    send_cmd(a_, "contact-check " + id + " short");
+    ASSERT_TRUE(wait_for(a_, "Invalid contact data", 5000));
+    // Missing/extra arguments must not consume the following command.
+    send_cmd(a_, "contact-check " + id);
+    send_cmd(a_, "contact-check " + id + " " + fingerprint + " extra");
+    send_cmd(a_, "contact-show");
+    ASSERT_TRUE(wait_for(a_, "Public key SHA-256:", 5000));
+    const auto output = read_file(a_.out);
+    std::size_t invalid_count = 0;
+    std::size_t position = 0;
+    while ((position = output.find("Invalid contact data", position)) != std::string::npos) {
+        ++invalid_count;
+        ++position;
+    }
+    EXPECT_EQ(invalid_count, 3u);
+    EXPECT_EQ(read_file(contacts_path), saved);
+}
+
 TEST_F(E2ETest, TwoPeersExchangeMessages) {
     auto [port_a, port_b] = reserve_two_ports();
     ASSERT_NE(port_a, 0);

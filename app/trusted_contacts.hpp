@@ -1,5 +1,6 @@
 #pragma once
 
+#include "models/public_key_fingerprint.hpp"
 #include <array>
 #include <cstddef>
 #include <expected>
@@ -9,9 +10,6 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
-
-// SHA-256 digest of the DER-encoded SubjectPublicKeyInfo, not the certificate.
-using PublicKeyFingerprint = std::array<std::byte, 32>;
 
 enum class TrustedContactsError {
   InvalidUserId,

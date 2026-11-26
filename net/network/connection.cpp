@@ -197,6 +197,23 @@ TCPConnection::~TCPConnection() {
                socket_.get_fd());
 }
 
+std::expected<PublicKeyFingerprint, PeerFingerprintError>
+TCPConnection::peer_fingerprint() {
+  std::lock_guard<std::mutex> lock{transport_mutex_};
+
+  return std::visit(
+      [](const auto &transport)
+          -> std::expected<PublicKeyFingerprint, PeerFingerprintError> {
+        if constexpr (std::is_same_v<std::decay_t<decltype(transport)>,
+                                     TLSTransport>) {
+          return transport.peer_fingerprint();
+        } else {
+          return std::unexpected(PeerFingerprintError::NoTLS);
+        }
+      },
+      transport_);
+}
+
 const Endpoint &TCPConnection::endpoint() const { return endpoint_; }
 
 const Socket &TCPConnection::socket() const { return socket_; }

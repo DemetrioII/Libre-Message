@@ -6,7 +6,8 @@
 #include <utility>
 #include <vector>
 
-static constexpr std::string_view kContactPrefix = "libremessage://contact?v=1&id=";
+static constexpr std::string_view kContactPrefix =
+    "libremessage://contact?v=1&id=";
 static constexpr std::string_view kFingerprintField = "&spki_sha256=";
 
 static bool valid_contact_id(std::string_view id) {
@@ -20,15 +21,24 @@ static bool valid_contact_id(std::string_view id) {
 
 std::string_view contact_error_message(ContactError error) {
   switch (error) {
-  case ContactError::InvalidInvitation: return "Invalid contact invitation or unsupported version";
-  case ContactError::CertificateError: return "Cannot read certificate and matching private key";
-  case ContactError::IoError: return "Cannot read or write file";
-  case ContactError::InvalidImage: return "Invalid PNG or image exceeds size limit";
-  case ContactError::QrNotFound: return "No readable QR code found";
-  case ContactError::AmbiguousQr: return "Image must contain exactly one QR code";
-  case ContactError::KeyConflict: return "Contact already has a different trusted key";
-  case ContactError::SelfContact: return "Cannot import your own contact ID";
-  case ContactError::InvalidContactsFile: return "Cannot load trusted contacts file";
+  case ContactError::InvalidInvitation:
+    return "Invalid contact invitation or unsupported version";
+  case ContactError::CertificateError:
+    return "Cannot read certificate and matching private key";
+  case ContactError::IoError:
+    return "Cannot read or write file";
+  case ContactError::InvalidImage:
+    return "Invalid PNG or image exceeds size limit";
+  case ContactError::QrNotFound:
+    return "No readable QR code found";
+  case ContactError::AmbiguousQr:
+    return "Image must contain exactly one QR code";
+  case ContactError::KeyConflict:
+    return "Contact already has a different trusted key";
+  case ContactError::SelfContact:
+    return "Cannot import your own contact ID";
+  case ContactError::InvalidContactsFile:
+    return "Cannot load trusted contacts file";
   }
   return "Unknown contact error";
 }
@@ -48,14 +58,15 @@ std::string fingerprint_hex(const PublicKeyFingerprint &fingerprint) {
 std::expected<std::string, ContactError> ContactInvitation::encode() const {
   if (!valid_contact_id(user_id))
     return std::unexpected(ContactError::InvalidInvitation);
-  return std::string(kContactPrefix) + user_id + std::string(kFingerprintField) +
-         fingerprint_hex(fingerprint);
+  return std::string(kContactPrefix) + user_id +
+         std::string(kFingerprintField) + fingerprint_hex(fingerprint);
 }
 
 std::expected<ContactInvitation, ContactError>
 ContactInvitation::parse(std::string_view text) {
   constexpr auto id_size = SessionInfo::kSessionIdSize;
-  constexpr auto size = kContactPrefix.size() + id_size + kFingerprintField.size() + 64;
+  constexpr auto size =
+      kContactPrefix.size() + id_size + kFingerprintField.size() + 64;
   if (text.size() != size || !text.starts_with(kContactPrefix))
     return std::unexpected(ContactError::InvalidInvitation);
   text.remove_prefix(kContactPrefix.size());
@@ -102,22 +113,15 @@ make_contact_invitation(std::string user_id,
   // An explicit empty password avoids interactive OpenSSL password prompts.
   char password[] = "";
   std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key(
-      PEM_read_bio_PrivateKey(key_bio.get(), nullptr, nullptr, password), EVP_PKEY_free);
+      PEM_read_bio_PrivateKey(key_bio.get(), nullptr, nullptr, password),
+      EVP_PKEY_free);
   if (!cert || !key || X509_check_private_key(cert.get(), key.get()) != 1)
     return std::unexpected(ContactError::CertificateError);
-  EVP_PKEY *public_key = X509_get0_pubkey(cert.get());
-  const int der_size = public_key ? i2d_PUBKEY(public_key, nullptr) : -1;
-  if (der_size <= 0)
+
+  auto fingerprint = certificate_fingerprint(cert.get());
+
+  if (!fingerprint.has_value())
     return std::unexpected(ContactError::CertificateError);
-  std::vector<unsigned char> der(der_size);
-  auto destination = der.data();
-  if (i2d_PUBKEY(public_key, &destination) != der_size)
-    return std::unexpected(ContactError::CertificateError);
-  PublicKeyFingerprint fingerprint{};
-  unsigned length = 0;
-  if (EVP_Digest(der.data(), der.size(),
-                 reinterpret_cast<unsigned char *>(fingerprint.data()), &length,
-                 EVP_sha256(), nullptr) != 1 || length != fingerprint.size())
-    return std::unexpected(ContactError::CertificateError);
-  return ContactInvitation{std::move(user_id), fingerprint};
+
+  return ContactInvitation{std::move(user_id), *fingerprint};
 }

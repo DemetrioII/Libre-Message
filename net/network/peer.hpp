@@ -73,6 +73,10 @@ public:
 
   void send_data(ConnectionId id, std::span<std::byte> data);
 
+  // Looks up the connection at the time of the call; does not authenticate it.
+  std::expected<PublicKeyFingerprint, PeerFingerprintError>
+  peer_fingerprint(ConnectionId id);
+
   void broadcast(std::span<std::byte> data);
 
   void set_sender_id(const std::string &id);

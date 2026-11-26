@@ -76,6 +76,8 @@ public:
 
   bool has_to_write() const;
 
+  std::expected<PublicKeyFingerprint, PeerFingerprintError> peer_fingerprint();
+
   FlushResult flush();
 
   const Socket &socket() const;

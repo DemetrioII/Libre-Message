@@ -1,5 +1,6 @@
 #include "net/transport/transport.hpp"
 #include <errno.h>
+#include <memory>
 #include <openssl/err.h>
 #include <poll.h>
 #include <spdlog/spdlog.h>
@@ -274,6 +275,24 @@ FlushResult TLSTransport::write(std::span<const std::byte> data) {
     return {0, IOStatus::Error};
   }
   }
+}
+
+std::expected<PublicKeyFingerprint, PeerFingerprintError>
+TLSTransport::peer_fingerprint() const {
+  if (!ssl_ || state_ != TLSState::Established)
+    return std::unexpected(PeerFingerprintError::NoEstablished);
+
+  std::unique_ptr<X509, decltype(&X509_free)> cert(
+      SSL_get1_peer_certificate(ssl_), X509_free);
+  if (!cert)
+    return std::unexpected(PeerFingerprintError::MissingCertificate);
+
+  auto res = certificate_fingerprint(cert.get());
+
+  if (!res.has_value())
+    return std::unexpected(PeerFingerprintError::FingerprintFailed);
+
+  return *res;
 }
 
 FlushResult TLSTransport::read(std::span<std::byte> data) {

@@ -1,4 +1,5 @@
 #pragma once
+#include "models/public_key_fingerprint.hpp"
 #include <expected>
 #include <openssl/ssl.h>
 #include <span>
@@ -22,6 +23,14 @@ struct FlushResult {
 enum class ConnectionState { Connecting, TlsHandshaking, Established, Closing };
 enum class TCPTransportError {
   UnknownError,
+};
+
+enum class PeerFingerprintError {
+  NoEstablished,
+  MissingCertificate,
+  FingerprintFailed,
+  NoTLS,
+  ConnectionNotFound,
 };
 
 class PlainTCPTransport {
@@ -72,6 +81,9 @@ public:
   TLSTransport(TLSTransport &&other) noexcept;
   TLSTransport &operator=(TLSTransport &&other) noexcept;
   ~TLSTransport();
+
+  std::expected<PublicKeyFingerprint, PeerFingerprintError>
+  peer_fingerprint() const;
 };
 
 using TCPTransport = std::variant<PlainTCPTransport, TLSTransport>;

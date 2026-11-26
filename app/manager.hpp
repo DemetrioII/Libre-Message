@@ -10,6 +10,12 @@
 
 enum class ManagerError { ConnectFailed };
 
+enum class ContactCheckResult {
+  Match,
+  UnknownContact,
+  KeyMismatch,
+};
+
 class Manager {
   SessionInfo session_info_;
   ConnectionManager connection_manager_;
@@ -40,4 +46,7 @@ public:
   trust_contact(const ContactInvitation &invitation);
 
   std::expected<ContactInvitation, ContactError> own_contact() const;
+
+  std::expected<ContactCheckResult, ContactError>
+  check_contact(std::string_view user_id, std::string_view fingerprint) const;
 };

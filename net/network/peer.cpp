@@ -432,6 +432,23 @@ void TCPPeer::send_data(ConnectionId id, std::span<std::byte> data) {
   // EPOLLRDHUP);
 }
 
+std::expected<PublicKeyFingerprint, PeerFingerprintError>
+TCPPeer::peer_fingerprint(ConnectionId id) {
+  std::shared_ptr<TCPConnection> connection;
+  {
+    std::lock_guard<std::mutex> lock{connection_map_mutex_};
+    const auto id_it = id_to_fd_.find(id);
+    if (id_it == id_to_fd_.end())
+      return std::unexpected(PeerFingerprintError::ConnectionNotFound);
+    const auto it = connections_.find(id_it->second);
+    if (it == connections_.end() || it->second.id != id)
+      return std::unexpected(PeerFingerprintError::ConnectionNotFound);
+    connection = it->second.connection;
+  }
+  // Keep the connection alive without holding the map lock during transport I/O.
+  return connection->peer_fingerprint();
+}
+
 void TCPPeer::broadcast(std::span<std::byte> data) {
   std::vector<std::pair<int, std::shared_ptr<TCPConnection>>> targets;
   {

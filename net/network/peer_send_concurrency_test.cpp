@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <gtest/gtest.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -92,6 +93,62 @@ std::set<std::string> make_expected_ids() {
       ids.insert(make_message_id(sender, index));
   }
   return ids;
+}
+
+TEST(TCPPeerFingerprintTest, UnknownAndDisconnectedIdsAreNotFound) {
+  std::uint16_t port = 0;
+  ScopedFd listener(make_silent_listener(port));
+  ASSERT_GE(listener.get(), 0);
+  std::promise<ConnectionId> disconnected_event;
+  auto disconnected_future = disconnected_event.get_future();
+  TCPPeer peer("127.0.0.1", 0, 4, false);
+  peer.set_disconnect_handler(
+      [&](ConnectionId closed) { disconnected_event.set_value(closed); });
+  const auto unknown = peer.peer_fingerprint(kInvalidConnectionId);
+  ASSERT_FALSE(unknown);
+  EXPECT_EQ(unknown.error(), PeerFingerprintError::ConnectionNotFound);
+
+  const auto id = peer.connect("127.0.0.1", port, 4);
+  ASSERT_NE(id, kInvalidConnectionId);
+  const auto plain = peer.peer_fingerprint(id);
+  ASSERT_FALSE(plain);
+  EXPECT_EQ(plain.error(), PeerFingerprintError::NoTLS);
+
+  // Exercise remote EOF, independently of the host/port disconnect API.
+  pollfd pending{listener.get(), POLLIN, 0};
+  ASSERT_GT(::poll(&pending, 1, 2000), 0);
+  ScopedFd remote(::accept(listener.get(), nullptr, nullptr));
+  ASSERT_GE(remote.get(), 0);
+  ASSERT_EQ(::shutdown(remote.get(), SHUT_RDWR), 0);
+  peer.run_event_loop();
+  ASSERT_EQ(disconnected_future.wait_for(2s), std::future_status::ready);
+  ASSERT_EQ(disconnected_future.get(), id);
+  const auto disconnected = peer.peer_fingerprint(id);
+  ASSERT_FALSE(disconnected);
+  EXPECT_EQ(disconnected.error(), PeerFingerprintError::ConnectionNotFound);
+
+  // Reconnecting must not make a stale ConnectionId address the new connection.
+  const auto replacement = peer.connect("127.0.0.1", port, 4);
+  ASSERT_NE(replacement, kInvalidConnectionId);
+  ASSERT_NE(replacement, id);
+  const auto stale = peer.peer_fingerprint(id);
+  ASSERT_FALSE(stale);
+  EXPECT_EQ(stale.error(), PeerFingerprintError::ConnectionNotFound);
+  const auto current = peer.peer_fingerprint(replacement);
+  ASSERT_FALSE(current);
+  EXPECT_EQ(current.error(), PeerFingerprintError::NoTLS);
+}
+
+TEST(TCPPeerFingerprintTest, ForwardsTlsHandshakeState) {
+  std::uint16_t port = 0;
+  ScopedFd listener(make_silent_listener(port));
+  ASSERT_GE(listener.get(), 0);
+  TCPPeer peer("127.0.0.1", 0, 4, true);
+  const auto id = peer.connect("127.0.0.1", port, 4);
+  ASSERT_NE(id, kInvalidConnectionId);
+  const auto result = peer.peer_fingerprint(id);
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error(), PeerFingerprintError::NoEstablished);
 }
 
 TEST(TCPPeerSendConcurrencyTest, ConcurrentSendDataPreservesMessages) {

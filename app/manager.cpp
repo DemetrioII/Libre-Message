@@ -143,3 +143,25 @@ void Manager::send(std::string_view recipient_id, std::string &&msg_to_send) {
 std::expected<ContactInvitation, ContactError> Manager::own_contact() const {
   return make_contact_invitation(sender_id_, "server.crt", "server.key");
 }
+
+std::expected<ContactCheckResult, ContactError>
+Manager::check_contact(std::string_view user_id,
+                       std::string_view fingerprint) const {
+  const std::string text =
+      "libremessage://contact?v=1&id=" + std::string(user_id) +
+      "&spki_sha256=" + std::string(fingerprint);
+
+  const auto parsed = ContactInvitation::parse(text);
+  if (!parsed.has_value())
+    return std::unexpected(ContactError::InvalidInvitation);
+
+  auto trusted_contact = trusted_contacts_.find(user_id);
+  if (!trusted_contact)
+    return ContactCheckResult::UnknownContact;
+
+  if (trusted_contact == parsed->fingerprint) {
+    return ContactCheckResult::Match;
+  } else {
+    return ContactCheckResult::KeyMismatch;
+  }
+}

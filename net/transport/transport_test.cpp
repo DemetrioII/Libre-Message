@@ -3,6 +3,9 @@
 #include "net/transport/sendbuffer.hpp"
 
 #include <fcntl.h>
+#include <chrono>
+#include <memory>
+#include <utility>
 #include <gtest/gtest.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -49,6 +52,92 @@ TEST_F(TransportTest, SingleFrame) {
   EXPECT_EQ((*message)[0], std::byte('h'));
   EXPECT_EQ(recv_buf.size(), 0u);
 }
+
+namespace {
+
+TEST_F(TransportTest, PeerFingerprintBeforeTlsSetupReturnsNotEstablished) {
+  TLSTransport transport(fds_[0]);
+  const auto result = transport.peer_fingerprint();
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error(), PeerFingerprintError::NoEstablished);
+}
+
+TEST_F(TransportTest, PeerFingerprintBeforeHandshakeReturnsNotEstablished) {
+  TLSTransport transport(fds_[0]);
+  transport.set_role(1);
+  const auto result = transport.peer_fingerprint();
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error(), PeerFingerprintError::NoEstablished);
+}
+
+TEST_F(TransportTest, PeerFingerprintUsesEstablishedPeersCertificate) {
+  // An in-memory TLS server avoids certificate files and changes to the cwd.
+  std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key(
+      EVP_PKEY_Q_keygen(nullptr, nullptr, "EC", "prime256v1"), EVP_PKEY_free);
+  ASSERT_TRUE(key);
+  std::unique_ptr<X509, decltype(&X509_free)> cert(X509_new(), X509_free);
+  ASSERT_TRUE(cert);
+  ASSERT_EQ(X509_set_version(cert.get(), 2), 1);
+  ASSERT_EQ(ASN1_INTEGER_set(X509_get_serialNumber(cert.get()), 1), 1);
+  ASSERT_NE(X509_gmtime_adj(X509_getm_notBefore(cert.get()), 0), nullptr);
+  ASSERT_NE(X509_gmtime_adj(X509_getm_notAfter(cert.get()), 3600), nullptr);
+  ASSERT_EQ(X509_set_pubkey(cert.get(), key.get()), 1);
+  auto name = X509_get_subject_name(cert.get());
+  ASSERT_EQ(X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+      reinterpret_cast<const unsigned char *>("peer-fingerprint-test"),
+      -1, -1, 0), 1);
+  ASSERT_EQ(X509_set_issuer_name(cert.get(), name), 1);
+  ASSERT_GT(X509_sign(cert.get(), key.get(), EVP_sha256()), 0);
+
+  std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> context(
+      SSL_CTX_new(TLS_server_method()), SSL_CTX_free);
+  ASSERT_TRUE(context);
+  ASSERT_EQ(SSL_CTX_use_certificate(context.get(), cert.get()), 1);
+  ASSERT_EQ(SSL_CTX_use_PrivateKey(context.get(), key.get()), 1);
+  std::unique_ptr<SSL, decltype(&SSL_free)> server(SSL_new(context.get()), SSL_free);
+  ASSERT_TRUE(server);
+  ASSERT_EQ(SSL_set_fd(server.get(), fds_[1]), 1);
+
+  TLSTransport client(fds_[0]);
+  client.set_role(1);
+  bool server_ready = false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while ((!server_ready || client.state() != TLSState::Established) &&
+         std::chrono::steady_clock::now() < deadline) {
+    if (client.state() != TLSState::Established) {
+      const auto result = client.connect();
+      ASSERT_TRUE(result.status == IOStatus::Complete ||
+                  result.status == IOStatus::WantRead ||
+                  result.status == IOStatus::WantWrite);
+    }
+    if (!server_ready) {
+      const int result = SSL_accept(server.get());
+      if (result == 1) {
+        server_ready = true;
+      } else {
+        const int error = SSL_get_error(server.get(), result);
+        ASSERT_TRUE(error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE);
+      }
+    }
+  }
+  ASSERT_TRUE(server_ready);
+  ASSERT_EQ(client.state(), TLSState::Established);
+  const auto expected = certificate_fingerprint(cert.get());
+  ASSERT_TRUE(expected);
+  const auto actual = client.peer_fingerprint();
+  ASSERT_TRUE(actual);
+  EXPECT_EQ(*actual, *expected);
+  // Querying twice must neither consume nor prematurely free the certificate.
+  EXPECT_EQ(client.peer_fingerprint(), actual);
+
+  TLSTransport moved(std::move(client));
+  EXPECT_EQ(moved.peer_fingerprint(), actual);
+  const auto moved_from = client.peer_fingerprint();
+  ASSERT_FALSE(moved_from);
+  EXPECT_EQ(moved_from.error(), PeerFingerprintError::NoEstablished);
+}
+
+} // namespace
 
 TEST_F(TransportTest, PartialFrameAcrossReads) {
   TCPTransport sender = PlainTCPTransport(fds_[0]);

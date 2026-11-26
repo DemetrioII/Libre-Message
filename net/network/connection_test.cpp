@@ -44,6 +44,33 @@ protected:
   Endpoint endpoint_;
 };
 
+TEST_F(ConnectionTest, PlainConnectionHasNoTlsFingerprint) {
+  auto connection = make_connection(Role::Client);
+  const auto result = connection.peer_fingerprint();
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error(), PeerFingerprintError::NoTLS);
+}
+
+TEST_F(ConnectionTest, TlsFingerprintBeforeAndDuringHandshakeIsNotEstablished) {
+  auto connection = make_connection(Role::Client, true);
+  const auto before = connection.peer_fingerprint();
+  ASSERT_FALSE(before);
+  EXPECT_EQ(before.error(), PeerFingerprintError::NoEstablished);
+
+  ASSERT_EQ(connection.continue_handshake().status, IOStatus::WantRead);
+  const auto during = connection.peer_fingerprint();
+  ASSERT_FALSE(during);
+  EXPECT_EQ(during.error(), PeerFingerprintError::NoEstablished);
+
+  TCPConnection moved(std::move(connection));
+  const auto after_move = moved.peer_fingerprint();
+  ASSERT_FALSE(after_move);
+  EXPECT_EQ(after_move.error(), PeerFingerprintError::NoEstablished);
+  const auto moved_from = connection.peer_fingerprint();
+  ASSERT_FALSE(moved_from);
+  EXPECT_EQ(moved_from.error(), PeerFingerprintError::NoEstablished);
+}
+
 TEST_F(ConnectionTest, MovePreservesEstablishedState) {
   auto connection = make_connection(Role::Client);
   ASSERT_EQ(connection.continue_handshake().status, IOStatus::Complete);

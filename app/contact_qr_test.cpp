@@ -20,6 +20,20 @@ ContactInvitation invitation() {
   return result;
 }
 
+TEST(CertificateFingerprintTest, RejectsNullCertificate) {
+  const auto result = certificate_fingerprint(nullptr);
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error(), FingerprintError::InvalidCertificate);
+}
+
+TEST(CertificateFingerprintTest, RejectsCertificateWithoutPublicKey) {
+  std::unique_ptr<X509, decltype(&X509_free)> cert(X509_new(), X509_free);
+  ASSERT_TRUE(cert);
+  const auto result = certificate_fingerprint(cert.get());
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error(), FingerprintError::InvalidCertificate);
+}
+
 TEST(ContactInvitationTest, CanonicalTextRoundTrip) {
   const auto original = invitation();
   const auto text = original.encode();
